@@ -16,11 +16,11 @@ TEMPLATE = """<!doctype html>
     <meta charset=\"utf-8\">
     <title>MyTube Remote</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
-      h1 { margin-bottom: 0.25rem; }
-      p.description { color: #333; margin-top: 0; }
-      ul { padding-left: 1.2rem; }
-      .status { margin-top: 1.5rem; padding: 1rem; border-radius: 0.5rem; background: #f5f5f5; }
+      body {{ font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }}
+      h1 {{ margin-bottom: 0.25rem; }}
+      p.description {{ color: #333; margin-top: 0; }}
+      ul {{ padding-left: 1.2rem; }}
+      .status {{ margin-top: 1.5rem; padding: 1rem; border-radius: 0.5rem; background: #f5f5f5; }}
     </style>
   </head>
   <body>
