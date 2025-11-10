@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+import uvicorn
+
 from . import create_app
 
 
@@ -14,7 +16,7 @@ def main() -> None:
     args = parser.parse_args()
 
     app = create_app()
-    app.run(host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":  # pragma: no cover - direct execution guard

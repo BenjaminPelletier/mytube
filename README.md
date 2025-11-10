@@ -1,6 +1,6 @@
 # mytube
 
-A minimal Flask web application that exposes a single "remote control" for casting a YouTube recommendation to a Chromecast device.
+A minimal FastAPI web application that exposes a single "remote control" for casting a YouTube recommendation to a Chromecast device.
 
 ## Running the app
 
