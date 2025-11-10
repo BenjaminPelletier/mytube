@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import html
 
+import logging
+
 from fastapi import FastAPI
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse
 
 from .casting import CastResult, ChromecastUnavailableError, cast_youtube_video
+
+logger = logging.getLogger(__name__)
 
 YOUTUBE_VIDEO_ID = "CYlon2tvywA"
 TEMPLATE = """<!doctype html>
@@ -59,14 +64,19 @@ def create_app() -> FastAPI:
     @app.get("/cast", response_class=HTMLResponse)
     async def cast_featured() -> HTMLResponse:
         try:
-            result: CastResult = cast_youtube_video(YOUTUBE_VIDEO_ID)
+            result: CastResult = await run_in_threadpool(
+                cast_youtube_video, YOUTUBE_VIDEO_ID
+            )
         except ChromecastUnavailableError as exc:  # pragma: no cover - network hardware required
+            logger.warning("Chromecast unavailable: %s", exc)
             return _render(str(exc))
 
         status = (
             "Casting YouTube video "
             f"https://youtu.be/{result.video_id} to Chromecast '{result.device_name}'."
         )
+        logger.info("%s", status)
         return _render(status)
 
     return app
+
