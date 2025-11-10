@@ -1,10 +1,18 @@
-"""Flask application that exposes a Chromecast remote."""
+"""FastAPI application that exposes a Chromecast remote."""
 
 from __future__ import annotations
 
-from flask import Flask, render_template_string, url_for
+import html
+
+import logging
+
+from fastapi import FastAPI
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import HTMLResponse
 
 from .casting import CastResult, ChromecastUnavailableError, cast_youtube_video
+
+logger = logging.getLogger(__name__)
 
 YOUTUBE_VIDEO_ID = "CYlon2tvywA"
 TEMPLATE = """<!doctype html>
@@ -13,54 +21,62 @@ TEMPLATE = """<!doctype html>
     <meta charset=\"utf-8\">
     <title>MyTube Remote</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
-      h1 { margin-bottom: 0.25rem; }
-      p.description { color: #333; margin-top: 0; }
-      ul { padding-left: 1.2rem; }
-      .status { margin-top: 1.5rem; padding: 1rem; border-radius: 0.5rem; background: #f5f5f5; }
+      body {{ font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }}
+      h1 {{ margin-bottom: 0.25rem; }}
+      p.description {{ color: #333; margin-top: 0; }}
+      ul {{ padding-left: 1.2rem; }}
+      .status {{ margin-top: 1.5rem; padding: 1rem; border-radius: 0.5rem; background: #f5f5f5; }}
     </style>
   </head>
   <body>
     <h1>MyTube Remote</h1>
     <p class=\"description\">Kick off the featured recommendation on your Chromecast.</p>
     <ul>
-      <li><a href=\"{{ cast_url }}\">Play the featured video</a></li>
+      <li><a href=\"{cast_url}\">Play the featured video</a></li>
     </ul>
-    {% if status %}
-    <p class=\"status\">{{ status }}</p>
-    {% endif %}
+{status_block}
   </body>
 </html>
 """
 
 
-def create_app() -> Flask:
-    """Create a configured Flask application instance."""
+def create_app() -> FastAPI:
+    """Create a configured FastAPI application instance."""
 
-    app = Flask(__name__)
+    app = FastAPI(title="MyTube Remote")
 
-    def _render(status: str | None = None) -> str:
-        return render_template_string(
-            TEMPLATE,
-            cast_url=url_for("cast_featured"),
-            status=status,
+    def _render(status: str | None = None) -> HTMLResponse:
+        status_block = ""
+        if status:
+            safe_status = html.escape(status)
+            status_block = f"    <p class=\"status\">{safe_status}</p>\n"
+
+        html_content = TEMPLATE.format(
+            cast_url=app.url_path_for("cast_featured"),
+            status_block=status_block,
         )
+        return HTMLResponse(html_content)
 
-    @app.get("/")
-    def home() -> str:
+    @app.get("/", response_class=HTMLResponse)
+    async def home() -> HTMLResponse:
         return _render()
 
-    @app.get("/cast")
-    def cast_featured() -> str:
+    @app.get("/cast", response_class=HTMLResponse)
+    async def cast_featured() -> HTMLResponse:
         try:
-            result: CastResult = cast_youtube_video(YOUTUBE_VIDEO_ID)
+            result: CastResult = await run_in_threadpool(
+                cast_youtube_video, YOUTUBE_VIDEO_ID
+            )
         except ChromecastUnavailableError as exc:  # pragma: no cover - network hardware required
+            logger.warning("Chromecast unavailable: %s", exc)
             return _render(str(exc))
 
         status = (
             "Casting YouTube video "
             f"https://youtu.be/{result.video_id} to Chromecast '{result.device_name}'."
         )
+        logger.info("%s", status)
         return _render(status)
 
     return app
+

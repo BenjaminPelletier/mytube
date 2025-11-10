@@ -8,8 +8,9 @@ version = "0.1.0"
 description = "Simple Chromecast remote for a recommended YouTube video."
 requires-python = ">=3.11"
 dependencies = [
-    "Flask>=3.0",
+    "fastapi>=0.110",
     "PyChromecast>=13.0",
+    "uvicorn>=0.22",
 ]
 
 [project.scripts]

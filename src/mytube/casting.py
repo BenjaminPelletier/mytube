@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -22,13 +23,16 @@ class CastResult:
 
 
 def _select_device(devices: Iterable[pychromecast.Chromecast], *, name: Optional[str] = None) -> pychromecast.Chromecast:
-    for device in devices:
+    discovered = list(devices)
+    for device in discovered:
         if name is None or device.name == name:
             return device
     if name is None:
         message = "No Chromecast devices were discovered on the local network."
     else:
         message = f"No Chromecast device named '{name}' was found."
+    available = ", ".join(device.name for device in discovered) or "<none>"
+    logging.getLogger(__name__).warning("Chromecast discovery candidates: %s", available)
     raise ChromecastUnavailableError(message)
 
 
