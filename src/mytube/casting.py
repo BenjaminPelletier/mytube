@@ -36,6 +36,17 @@ def _select_device(devices: Iterable[pychromecast.Chromecast], *, name: Optional
     raise ChromecastUnavailableError(message)
 
 
+def discover_chromecast_names() -> list[str]:
+    """Return the names of Chromecast devices that are currently discoverable."""
+
+    chromecasts, browser = pychromecast.get_chromecasts()
+    try:
+        return [device.name for device in chromecasts]
+    finally:
+        if browser is not None:
+            browser.stop_discovery()
+
+
 def cast_youtube_video(video_id: str, *, device_name: str | None = None) -> CastResult:
     """Cast a YouTube video to the first available Chromecast."""
 
