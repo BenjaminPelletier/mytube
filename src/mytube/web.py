@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,8 @@ from .casting import (
     discover_chromecast_names,
 )
 from .db import (
+    fetch_all_channels,
+    fetch_all_videos,
     fetch_channel,
     fetch_playlist_items,
     fetch_video,
@@ -148,6 +151,106 @@ def _section_overview_content(section: str) -> str:
             "</section>"
         )
     return "".join(items)
+
+
+def _resource_vote(label: str | None) -> str:
+    if label == "whitelisted":
+        return "👍"
+    if label == "blacklisted":
+        return "👎"
+    return ""
+
+
+def _channels_overview_content(channels: list[dict[str, Any]]) -> str:
+    if not channels:
+        return (
+            "<section>"
+            "<h2>Stored Channels</h2>"
+            "<p>No channels have been stored yet.</p>"
+            "</section>"
+        )
+
+    items = []
+    for channel in channels:
+        channel_id = channel.get("id") or ""
+        if not channel_id:
+            continue
+        title = channel.get("title") or channel_id
+        retrieved_at = channel.get("retrieved_at") or "Unknown"
+        vote = _resource_vote(channel.get("label"))
+        encoded_id = quote(channel_id, safe="")
+        link = f"<a href=\"/configure/channels/{encoded_id}\">{html.escape(title)}</a>"
+        vote_display = f" {vote}" if vote else ""
+        items.append(
+            "<li>"
+            f"{link}{vote_display}"
+            f"<br><small>Retrieved: {html.escape(retrieved_at)}</small>"
+            "</li>"
+        )
+
+    if not items:
+        return (
+            "<section>"
+            "<h2>Stored Channels</h2>"
+            "<p>No channels have been stored yet.</p>"
+            "</section>"
+        )
+
+    items_html = "".join(items)
+    return (
+        "<section>"
+        "<h2>Stored Channels</h2>"
+        "<ol>"
+        f"{items_html}"
+        "</ol>"
+        "</section>"
+    )
+
+
+def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
+    if not videos:
+        return (
+            "<section>"
+            "<h2>Stored Videos</h2>"
+            "<p>No videos have been stored yet.</p>"
+            "</section>"
+        )
+
+    items = []
+    for video in videos:
+        video_id = video.get("id") or ""
+        if not video_id:
+            continue
+        title = video.get("title") or video_id
+        retrieved_at = video.get("retrieved_at") or "Unknown"
+        vote = _resource_vote(video.get("label"))
+        encoded_id = quote(video_id, safe="")
+        link = f"<a href=\"/configure/videos/{encoded_id}\">{html.escape(title)}</a>"
+        vote_display = f" {vote}" if vote else ""
+        items.append(
+            "<li>"
+            f"{link}{vote_display}"
+            f"<br><small>Retrieved: {html.escape(retrieved_at)}</small>"
+            "</li>"
+        )
+
+    if not items:
+        return (
+            "<section>"
+            "<h2>Stored Videos</h2>"
+            "<p>No videos have been stored yet.</p>"
+            "</section>"
+        )
+
+    items_html = "".join(items)
+    return (
+        "<section>"
+        "<h2>Stored Videos</h2>"
+        "<ol>"
+        f"{items_html}"
+        "</ol>"
+        "</section>"
+    )
 
 
 def _resource_detail_content(section: str, resource_id: str, list_choice: str | None) -> str:
@@ -365,7 +468,14 @@ def create_app() -> FastAPI:
     @app.get("/configure/{section}", response_class=HTMLResponse, name="configure_section")
     async def configure_section(request: Request, section: str) -> HTMLResponse:
         normalized_section = _validate_section(section)
-        content = _section_overview_content(normalized_section)
+        if normalized_section == "channels":
+            channels = await run_in_threadpool(fetch_all_channels)
+            content = _channels_overview_content(channels)
+        elif normalized_section == "videos":
+            videos = await run_in_threadpool(fetch_all_videos)
+            content = _videos_overview_content(videos)
+        else:
+            content = _section_overview_content(normalized_section)
         heading = f"Manage {CONFIG_LABELS[normalized_section]}"
         return _render_config_page(
             request,
