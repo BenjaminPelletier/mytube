@@ -259,11 +259,9 @@ def _listed_videos_content(
 
     heading_label = LIST_PAGE_LABELS.get(list_slug, list_slug.title())
     primary_field = LIST_PAGE_FIELDS[list_slug]
-    primary_prefix = LISTED_VIDEO_FIELD_PREFIXES[primary_field]
     secondary_field = (
         "blacklisted_by" if primary_field == "whitelisted_by" else "whitelisted_by"
     )
-    secondary_prefix = LISTED_VIDEO_FIELD_PREFIXES[secondary_field]
 
     button_html = (
         f"<form class=\"regenerate-form\" method=\"post\" action=\"{html.escape(regenerate_url)}\">"
@@ -280,6 +278,24 @@ def _listed_videos_content(
             "</section>"
         )
 
+    identifier_pool: set[str] = set()
+    for video in videos:
+        for field in ("whitelisted_by", "blacklisted_by"):
+            values = video.get(field)
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if isinstance(value, str):
+                    normalized = value.strip()
+                    if normalized:
+                        identifier_pool.add(normalized)
+
+    reference_map = (
+        _build_resource_reference_map(sorted(identifier_pool))
+        if identifier_pool
+        else {}
+    )
+
     items: list[str] = []
     for video in videos:
         video_id = video.get("video_id") or ""
@@ -290,30 +306,8 @@ def _listed_videos_content(
         link = (
             f"<a href=\"/configure/videos/{encoded_video_id}\">{html.escape(title)}</a>"
         )
-        identifier_lines: list[str] = []
-        primary_values = [
-            value
-            for value in (video.get(primary_field) or [])
-            if isinstance(value, str) and value
-        ]
-        if primary_values:
-            joined_primary = ", ".join(html.escape(value) for value in primary_values)
-            identifier_lines.append(
-                f"<small>{primary_prefix} {joined_primary}</small>"
-            )
-        secondary_values = [
-            value
-            for value in (video.get(secondary_field) or [])
-            if isinstance(value, str) and value
-        ]
-        if secondary_values:
-            joined_secondary = ", ".join(html.escape(value) for value in secondary_values)
-            identifier_lines.append(
-                f"<small>{secondary_prefix} {joined_secondary}</small>"
-            )
-        identifiers_html = "<br>".join(identifier_lines)
-        if identifiers_html:
-            identifiers_html = f"<br>{identifiers_html}"
+        listed_lines = _format_listed_lines(video, reference_map)
+        identifiers_html = listed_lines or ""
         items.append(
             "<li>"
             f"{link}"

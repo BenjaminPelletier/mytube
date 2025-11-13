@@ -735,7 +735,9 @@ def repopulate_listed_videos() -> None:
             .where(ResourceLabel.label.in_({"whitelisted", "blacklisted"}))
         )
         for channel_id, uploads_playlist, label in session.exec(channel_stmt):
-            if not uploads_playlist:
+            if not isinstance(channel_id, str) or not channel_id:
+                continue
+            if not isinstance(uploads_playlist, str) or not uploads_playlist:
                 continue
             key = "whitelisted_by" if label == "whitelisted" else "blacklisted_by"
             items_stmt = select(PlaylistItem).where(
