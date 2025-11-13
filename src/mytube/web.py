@@ -40,10 +40,11 @@ from .db import (
     set_resource_label,
 )
 from .youtube import (
-    fetch_youtube_playlist,
     fetch_youtube_channel_sections,
+    fetch_youtube_channels,
+    fetch_youtube_playlist_items,
     fetch_youtube_playlists,
-    fetch_youtube_section_data,
+    fetch_youtube_videos,
     load_youtube_api_key,
 )
 
@@ -72,9 +73,9 @@ CONFIG_ROUTE_NAMES = {
 }
 
 CREATE_ROUTE_NAMES = {
-    "channels": "create_channels",
-    "playlists": "create_playlists",
-    "videos": "create_videos",
+    "channels": "create_channel",
+    "playlists": "create_playlist",
+    "videos": "create_video",
 }
 
 
@@ -577,166 +578,6 @@ def create_app() -> FastAPI:
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["channels"]),
         )
 
-    async def _create_resource(
-        request: Request,
-        section: str,
-        resource_id: str,
-        list_choice: str,
-    ) -> Response:
-        normalized_section = _validate_section(section)
-        stripped_resource_id = resource_id.strip()
-        if not stripped_resource_id:
-            raise HTTPException(status_code=400, detail="Resource ID is required")
-        if list_choice not in LIST_LABELS:
-            raise HTTPException(status_code=400, detail="Unknown list selection")
-
-        api_key = load_youtube_api_key()
-        request_url, response_data = await fetch_youtube_section_data(
-            normalized_section, stripped_resource_id, api_key
-        )
-        if normalized_section == "playlists":
-            playlist_items = response_data.get("items", [])
-            await run_in_threadpool(
-                save_playlist_items, stripped_resource_id, playlist_items
-            )
-            _, playlist_metadata = await fetch_youtube_playlist(
-                stripped_resource_id, api_key
-            )
-            playlist_data = (playlist_metadata.get("items") or [None])[0]
-            if playlist_data:
-                now = datetime.now(timezone.utc)
-
-                def _persist_playlist() -> None:
-                    save_playlist(playlist_data, retrieved_at=now)
-
-                await run_in_threadpool(_persist_playlist)
-            redirect_url = app.url_path_for(
-                "view_resource",
-                section=normalized_section,
-                resource_id=stripped_resource_id,
-            )
-            if list_choice in LIST_LABELS:
-                redirect_url = f"{redirect_url}?list={list_choice}"
-            return RedirectResponse(redirect_url, status_code=303)
-        if normalized_section == "channels":
-            items = response_data.get("items") or []
-            if not items:
-                raise HTTPException(status_code=404, detail="Channel not found")
-            channel_data = items[0]
-            channel_id = channel_data.get("id") or stripped_resource_id
-            label = LIST_TO_RESOURCE_LABEL.get(list_choice)
-            if label is None:
-                raise HTTPException(status_code=400, detail="Unknown list selection")
-
-            sections_items: list[dict[str, Any]] = []
-            if channel_data.get("id"):
-                _, sections_data = await fetch_youtube_channel_sections(
-                    channel_data["id"], api_key
-                )
-                sections_items = sections_data.get("items") or []
-            playlist_ids: list[str] = []
-            playlist_id_set: set[str] = set()
-
-            uploads_playlist_id = (
-                ((channel_data.get("contentDetails") or {}).get("relatedPlaylists") or {})
-                .get("uploads")
-            )
-            if isinstance(uploads_playlist_id, str) and uploads_playlist_id:
-                playlist_id_set.add(uploads_playlist_id)
-                playlist_ids.append(uploads_playlist_id)
-
-            for section in sections_items:
-                if not isinstance(section, dict):
-                    continue
-                content_details = section.get("contentDetails") or {}
-                playlists = content_details.get("playlists") or []
-                for playlist_id in playlists:
-                    if (
-                        isinstance(playlist_id, str)
-                        and playlist_id
-                        and playlist_id not in playlist_id_set
-                    ):
-                        playlist_id_set.add(playlist_id)
-                        playlist_ids.append(playlist_id)
-            playlist_metadata_map: dict[str, dict[str, Any]] = {}
-            if playlist_ids:
-                playlist_metadata_items = await fetch_youtube_playlists(
-                    playlist_ids, api_key
-                )
-                playlist_metadata_map = {
-                    item.get("id"): item
-                    for item in playlist_metadata_items
-                    if isinstance(item, dict) and item.get("id")
-                }
-            playlist_items_map: dict[str, list[dict[str, Any]]] = {}
-            for playlist_id in playlist_ids:
-                _, playlist_items_response = await fetch_youtube_section_data(
-                    "playlists", playlist_id, api_key
-                )
-                playlist_items_map[playlist_id] = (
-                    playlist_items_response.get("items") or []
-                )
-            retrieved_at = datetime.now(timezone.utc)
-
-            def _persist_channel() -> None:
-                save_channel(channel_data, retrieved_at=retrieved_at)
-                save_channel_sections(
-                    channel_id,
-                    sections_items,
-                    retrieved_at=retrieved_at,
-                )
-                for playlist_id in playlist_ids:
-                    items_to_save = playlist_items_map.get(playlist_id) or []
-                    save_playlist_items(playlist_id, items_to_save)
-                    playlist_metadata = playlist_metadata_map.get(playlist_id)
-                    if playlist_metadata:
-                        save_playlist(playlist_metadata, retrieved_at=retrieved_at)
-                set_resource_label("channel", channel_id, label)
-
-            await run_in_threadpool(_persist_channel)
-            redirect_url = app.url_path_for(
-                "view_resource",
-                section=normalized_section,
-                resource_id=channel_id,
-            )
-            return RedirectResponse(redirect_url, status_code=303)
-
-        if normalized_section == "videos":
-            items = response_data.get("items") or []
-            if not items:
-                raise HTTPException(status_code=404, detail="Video not found")
-            video_data = items[0]
-            video_id = video_data.get("id") or stripped_resource_id
-            label = LIST_TO_RESOURCE_LABEL.get(list_choice)
-            if label is None:
-                raise HTTPException(status_code=400, detail="Unknown list selection")
-
-            def _persist_video() -> None:
-                save_video(video_data, retrieved_at=datetime.now(timezone.utc))
-                set_resource_label("video", video_id, label)
-
-            await run_in_threadpool(_persist_video)
-            redirect_url = app.url_path_for(
-                "view_resource",
-                section=normalized_section,
-                resource_id=video_id,
-            )
-            return RedirectResponse(redirect_url, status_code=303)
-
-        content = _api_response_content(
-            stripped_resource_id, list_choice, request_url, response_data
-        )
-        heading = f"{CONFIG_LABELS[normalized_section]} API Preview"
-        return _render_config_page(
-            request,
-            app,
-            heading=heading,
-            active_section=normalized_section,
-            content=content,
-            form_action=app.url_path_for(CREATE_ROUTE_NAMES[normalized_section]),
-            resource_value=stripped_resource_id,
-        )
-
     @app.get(
         "/configure/channels",
         response_class=HTMLResponse,
@@ -791,29 +632,185 @@ def create_app() -> FastAPI:
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["videos"]),
         )
 
-    @app.post("/configure/channels", name="create_channels")
-    async def create_channels(
-        request: Request,
+    @app.post("/configure/channels", name="create_channel")
+    async def create_channel(
         resource_id: str = Form(..., alias="resource_id"),
         list_choice: str = Form(..., alias="list"),
     ) -> Response:
-        return await _create_resource(request, "channels", resource_id, list_choice)
+        stripped_resource_id = resource_id.strip()
+        if not stripped_resource_id:
+            raise HTTPException(status_code=400, detail="Resource ID is required")
+        if list_choice not in LIST_LABELS:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
 
-    @app.post("/configure/playlists", name="create_playlists")
-    async def create_playlists(
-        request: Request,
-        resource_id: str = Form(..., alias="resource_id"),
-        list_choice: str = Form(..., alias="list"),
-    ) -> Response:
-        return await _create_resource(request, "playlists", resource_id, list_choice)
+        api_key = load_youtube_api_key()
+        _, response_data = await fetch_youtube_channels(
+            stripped_resource_id, api_key
+        )
+        items = response_data.get("items") or []
+        if not items:
+            raise HTTPException(status_code=404, detail="Channel not found")
 
-    @app.post("/configure/videos", name="create_videos")
-    async def create_videos(
-        request: Request,
+        channel_data = items[0]
+        channel_id = channel_data.get("id") or stripped_resource_id
+        label = LIST_TO_RESOURCE_LABEL.get(list_choice)
+        if label is None:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
+
+        sections_items: list[dict[str, Any]] = []
+        if channel_data.get("id"):
+            _, sections_data = await fetch_youtube_channel_sections(
+                channel_data["id"], api_key
+            )
+            sections_items = sections_data.get("items") or []
+
+        playlist_ids: list[str] = []
+        playlist_id_set: set[str] = set()
+
+        uploads_playlist_id = (
+            ((channel_data.get("contentDetails") or {}).get("relatedPlaylists") or {})
+            .get("uploads")
+        )
+        if isinstance(uploads_playlist_id, str) and uploads_playlist_id:
+            playlist_id_set.add(uploads_playlist_id)
+            playlist_ids.append(uploads_playlist_id)
+
+        for section_data in sections_items:
+            if not isinstance(section_data, dict):
+                continue
+            content_details = section_data.get("contentDetails") or {}
+            playlists = content_details.get("playlists") or []
+            for playlist_id in playlists:
+                if (
+                    isinstance(playlist_id, str)
+                    and playlist_id
+                    and playlist_id not in playlist_id_set
+                ):
+                    playlist_id_set.add(playlist_id)
+                    playlist_ids.append(playlist_id)
+
+        playlist_metadata_map: dict[str, dict[str, Any]] = {}
+        if playlist_ids:
+            playlist_metadata_items = await fetch_youtube_playlists(playlist_ids, api_key)
+            playlist_metadata_map = {
+                item.get("id"): item
+                for item in playlist_metadata_items
+                if isinstance(item, dict) and item.get("id")
+            }
+
+        playlist_items_map: dict[str, list[dict[str, Any]]] = {}
+        for playlist_id in playlist_ids:
+            _, playlist_items_response = await fetch_youtube_playlist_items(
+                playlist_id, api_key
+            )
+            playlist_items_map[playlist_id] = (
+                playlist_items_response.get("items") or []
+            )
+
+        retrieved_at = datetime.now(timezone.utc)
+
+        def _persist_channel() -> None:
+            save_channel(channel_data, retrieved_at=retrieved_at)
+            save_channel_sections(
+                channel_id,
+                sections_items,
+                retrieved_at=retrieved_at,
+            )
+            for playlist_id in playlist_ids:
+                items_to_save = playlist_items_map.get(playlist_id) or []
+                save_playlist_items(playlist_id, items_to_save)
+                playlist_metadata = playlist_metadata_map.get(playlist_id)
+                if playlist_metadata:
+                    save_playlist(playlist_metadata, retrieved_at=retrieved_at)
+            set_resource_label("channel", channel_id, label)
+
+        await run_in_threadpool(_persist_channel)
+
+        redirect_url = app.url_path_for(
+            "view_resource",
+            section="channels",
+            resource_id=channel_id,
+        )
+        return RedirectResponse(redirect_url, status_code=303)
+
+    @app.post("/configure/playlists", name="create_playlist")
+    async def create_playlist(
         resource_id: str = Form(..., alias="resource_id"),
         list_choice: str = Form(..., alias="list"),
     ) -> Response:
-        return await _create_resource(request, "videos", resource_id, list_choice)
+        stripped_resource_id = resource_id.strip()
+        if not stripped_resource_id:
+            raise HTTPException(status_code=400, detail="Resource ID is required")
+        if list_choice not in LIST_LABELS:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
+
+        api_key = load_youtube_api_key()
+        _, response_data = await fetch_youtube_playlist_items(
+            stripped_resource_id, api_key
+        )
+
+        playlist_items = response_data.get("items", [])
+        await run_in_threadpool(
+            save_playlist_items, stripped_resource_id, playlist_items
+        )
+
+        playlist_metadata_items = await fetch_youtube_playlists(
+            [stripped_resource_id], api_key
+        )
+        playlist_data = playlist_metadata_items[0] if playlist_metadata_items else None
+        if playlist_data:
+            now = datetime.now(timezone.utc)
+
+            def _persist_playlist() -> None:
+                save_playlist(playlist_data, retrieved_at=now)
+
+            await run_in_threadpool(_persist_playlist)
+
+        redirect_url = app.url_path_for(
+            "view_resource",
+            section="playlists",
+            resource_id=stripped_resource_id,
+        )
+        redirect_url = f"{redirect_url}?list={list_choice}"
+        return RedirectResponse(redirect_url, status_code=303)
+
+    @app.post("/configure/videos", name="create_video")
+    async def create_video(
+        resource_id: str = Form(..., alias="resource_id"),
+        list_choice: str = Form(..., alias="list"),
+    ) -> Response:
+        stripped_resource_id = resource_id.strip()
+        if not stripped_resource_id:
+            raise HTTPException(status_code=400, detail="Resource ID is required")
+        if list_choice not in LIST_LABELS:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
+
+        api_key = load_youtube_api_key()
+        _, response_data = await fetch_youtube_videos(
+            stripped_resource_id, api_key
+        )
+        items = response_data.get("items") or []
+        if not items:
+            raise HTTPException(status_code=404, detail="Video not found")
+
+        video_data = items[0]
+        video_id = video_data.get("id") or stripped_resource_id
+        label = LIST_TO_RESOURCE_LABEL.get(list_choice)
+        if label is None:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
+
+        def _persist_video() -> None:
+            save_video(video_data, retrieved_at=datetime.now(timezone.utc))
+            set_resource_label("video", video_id, label)
+
+        await run_in_threadpool(_persist_video)
+
+        redirect_url = app.url_path_for(
+            "view_resource",
+            section="videos",
+            resource_id=video_id,
+        )
+        return RedirectResponse(redirect_url, status_code=303)
 
     @app.get(
         "/configure/{section}/{resource_id}",

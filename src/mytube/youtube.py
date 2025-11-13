@@ -59,40 +59,6 @@ def _youtube_api_request(endpoint: str, params: dict[str, str]) -> tuple[str, di
     return url, data
 
 
-async def fetch_youtube_section_data(
-    section: str, resource_id: str, api_key: str
-) -> tuple[str, dict[str, Any]]:
-    if section == "playlists":
-        params = {
-            "part": "snippet,contentDetails",
-            "playlistId": resource_id,
-            "maxResults": "50",
-            "key": api_key,
-        }
-        endpoint = "playlistItems"
-    elif section == "channels":
-        params = {
-            "part": "snippet,statistics,contentDetails",
-            "key": api_key,
-        }
-        if resource_id.startswith("@"):  # Handle input
-            params["forHandle"] = resource_id[1:]
-        else:
-            params["id"] = resource_id
-        endpoint = "channels"
-    elif section == "videos":
-        params = {
-            "part": "snippet,contentDetails,statistics",
-            "id": resource_id,
-            "key": api_key,
-        }
-        endpoint = "videos"
-    else:  # pragma: no cover - unreachable due to validation
-        raise HTTPException(status_code=400, detail="Unsupported section for API lookup")
-
-    return await run_in_threadpool(_youtube_api_request, endpoint, params)
-
-
 async def fetch_youtube_channel_sections(
     channel_id: str, api_key: str
 ) -> tuple[str, dict[str, Any]]:
@@ -107,17 +73,6 @@ async def fetch_youtube_channel_sections(
     return await run_in_threadpool(
         _youtube_api_request, "channelSections", params
     )
-
-
-async def fetch_youtube_playlist(playlist_id: str, api_key: str) -> tuple[str, dict[str, Any]]:
-    """Fetch metadata for a YouTube playlist."""
-
-    params = {
-        "part": "snippet,contentDetails",  # snippet contains title/description
-        "id": playlist_id,
-        "key": api_key,
-    }
-    return await run_in_threadpool(_youtube_api_request, "playlists", params)
 
 
 async def fetch_youtube_playlists(
@@ -143,11 +98,55 @@ async def fetch_youtube_playlists(
     return items
 
 
+async def fetch_youtube_playlist_items(
+    playlist_id: str, api_key: str
+) -> tuple[str, dict[str, Any]]:
+    """Fetch the items contained in a YouTube playlist."""
+
+    params = {
+        "part": "snippet,contentDetails",
+        "playlistId": playlist_id,
+        "maxResults": "50",
+        "key": api_key,
+    }
+    return await run_in_threadpool(_youtube_api_request, "playlistItems", params)
+
+
+async def fetch_youtube_channels(
+    resource_id: str, api_key: str
+) -> tuple[str, dict[str, Any]]:
+    """Fetch channel data for a YouTube channel ID or handle."""
+
+    params: dict[str, str] = {
+        "part": "snippet,statistics,contentDetails",
+        "key": api_key,
+    }
+    if resource_id.startswith("@"):
+        params["forHandle"] = resource_id[1:]
+    else:
+        params["id"] = resource_id
+    return await run_in_threadpool(_youtube_api_request, "channels", params)
+
+
+async def fetch_youtube_videos(
+    video_id: str, api_key: str
+) -> tuple[str, dict[str, Any]]:
+    """Fetch video data for a YouTube video."""
+
+    params = {
+        "part": "snippet,contentDetails,statistics",
+        "id": video_id,
+        "key": api_key,
+    }
+    return await run_in_threadpool(_youtube_api_request, "videos", params)
+
+
 __all__ = [
-    "fetch_youtube_section_data",
     "fetch_youtube_channel_sections",
-    "fetch_youtube_playlist",
+    "fetch_youtube_channels",
+    "fetch_youtube_playlist_items",
     "fetch_youtube_playlists",
+    "fetch_youtube_videos",
     "load_youtube_api_key",
 ]
 
