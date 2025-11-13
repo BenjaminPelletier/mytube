@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>MyTube Remote</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='home.css') }}">
+  </head>
+  <body>
+    <h1>MyTube Remote</h1>
+    <p class="description">Kick off the featured recommendation on your Chromecast.</p>
+    <ul>
+      <li><a id="cast-link" href="{{ cast_url }}">Play the featured video</a></li>
+    </ul>
+    {% if status %}
+    <p class="status">{{ status }}</p>
+    {% endif %}
+    <div id="device-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="device-modal-title">
+      <div class="modal-content">
+        <h2 id="device-modal-title">Choose a device</h2>
+        <p>Select a Chromecast device to begin casting.</p>
+        <ul id="device-list"></ul>
+        <button id="device-cancel" type="button">Cancel</button>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const castLink = document.getElementById("cast-link");
+        if (!castLink) {
+          return;
+        }
+
+        const modal = document.getElementById("device-modal");
+        const deviceList = document.getElementById("device-list");
+        const cancelButton = document.getElementById("device-cancel");
+
+        const hideModal = () => {
+          if (!modal) {
+            return;
+          }
+          modal.classList.add("hidden");
+          if (deviceList) {
+            deviceList.innerHTML = "";
+          }
+        };
+
+        const redirectToCast = (device) => {
+          const url = new URL(castLink.href, window.location.origin);
+          if (device) {
+            url.searchParams.set("device", device);
+          }
+          window.location.href = url.toString();
+        };
+
+        const showModal = (devices) => {
+          if (!modal || !deviceList) {
+            redirectToCast();
+            return;
+          }
+          deviceList.innerHTML = "";
+          devices.forEach((device) => {
+            const item = document.createElement("li");
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = device;
+            button.addEventListener("click", () => {
+              hideModal();
+              redirectToCast(device);
+            });
+            item.appendChild(button);
+            deviceList.appendChild(item);
+          });
+          modal.classList.remove("hidden");
+        };
+
+        castLink.addEventListener("click", async (event) => {
+          event.preventDefault();
+          try {
+            const response = await fetch("{{ devices_url }}");
+            if (!response.ok) {
+              throw new Error("Failed to load devices");
+            }
+            const payload = await response.json();
+            const devices = Array.isArray(payload.devices) ? payload.devices : [];
+            if (devices.length <= 1) {
+              redirectToCast(devices[0]);
+              return;
+            }
+            showModal(devices);
+          } catch (error) {
+            console.error(error);
+            redirectToCast();
+          }
+        });
+
+        if (cancelButton) {
+          cancelButton.addEventListener("click", () => {
+            hideModal();
+          });
+        }
+
+        if (modal) {
+          modal.addEventListener("click", (event) => {
+            if (event.target === modal) {
+              hideModal();
+            }
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

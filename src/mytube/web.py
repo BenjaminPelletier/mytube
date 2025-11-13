@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import html
-
 import logging
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette import status
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, RedirectResponse
 
 from .casting import (
     CastResult,
@@ -19,133 +22,167 @@ from .casting import (
 
 logger = logging.getLogger(__name__)
 
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+static_directory = BASE_DIR / "static"
+
 YOUTUBE_VIDEO_ID = "CYlon2tvywA"
-TEMPLATE = """<!doctype html>
-<html lang=\"en\">
-  <head>
-    <meta charset=\"utf-8\">
-    <title>MyTube Remote</title>
-    <style>
-      body {{ font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }}
-      h1 {{ margin-bottom: 0.25rem; }}
-      p.description {{ color: #333; margin-top: 0; }}
-      ul {{ padding-left: 1.2rem; }}
-      .status {{ margin-top: 1.5rem; padding: 1rem; border-radius: 0.5rem; background: #f5f5f5; }}
-      .modal {{ position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.4); }}
-      .modal.hidden {{ display: none; }}
-      .modal-content {{ background: #fff; padding: 1.5rem; border-radius: 0.75rem; width: min(90vw, 22rem); box-shadow: 0 10px 35px rgba(0, 0, 0, 0.2); }}
-      .modal-content h2 {{ margin-top: 0; margin-bottom: 0.5rem; }}
-      .modal-content p {{ margin-top: 0; color: #444; }}
-      #device-list {{ list-style: none; padding: 0; margin: 0 0 1rem; }}
-      #device-list li + li {{ margin-top: 0.5rem; }}
-      #device-list button {{ width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #ccc; border-radius: 0.5rem; background: #fafafa; font-size: 1rem; cursor: pointer; }}
-      #device-list button:hover {{ background: #f0f0f0; }}
-      #device-cancel {{ border: none; background: none; color: #0060df; cursor: pointer; font-size: 0.95rem; }}
-    </style>
-  </head>
-  <body>
-    <h1>MyTube Remote</h1>
-    <p class=\"description\">Kick off the featured recommendation on your Chromecast.</p>
-    <ul>
-      <li><a id=\"cast-link\" href=\"{cast_url}\">Play the featured video</a></li>
-    </ul>
-{status_block}
-    <div id=\"device-modal\" class=\"modal hidden\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"device-modal-title\">
-      <div class=\"modal-content\">
-        <h2 id=\"device-modal-title\">Choose a device</h2>
-        <p>Select a Chromecast device to begin casting.</p>
-        <ul id=\"device-list\"></ul>
-        <button id=\"device-cancel\" type=\"button\">Cancel</button>
-      </div>
-    </div>
-    <script>
-      (() => {{
-        const castLink = document.getElementById("cast-link");
-        if (!castLink) {{
-          return;
-        }}
 
-        const modal = document.getElementById("device-modal");
-        const deviceList = document.getElementById("device-list");
-        const cancelButton = document.getElementById("device-cancel");
+CONFIG_NAVIGATION = (
+    ("channels", "Channels"),
+    ("playlists", "Playlists"),
+    ("videos", "Videos"),
+)
+CONFIG_LABELS = {slug: label for slug, label in CONFIG_NAVIGATION}
 
-        const hideModal = () => {{
-          if (!modal) {{
-            return;
-          }}
-          modal.classList.add("hidden");
-          if (deviceList) {{
-            deviceList.innerHTML = "";
-          }}
-        }};
+LIST_LABELS = {"white": "Whitelist", "black": "Blacklist"}
 
-        const redirectToCast = (device) => {{
-          const url = new URL(castLink.href, window.location.origin);
-          if (device) {{
-            url.searchParams.set("device", device);
-          }}
-          window.location.href = url.toString();
-        }};
+HARD_CODED_RESOURCES = {
+    "channels": {
+        "UC_x5XG1OV2P6uZZ5FSM9Ttw": {
+            "title": "Google Developers",
+            "description": "The Google Developers channel, packed with product news and videos.",
+            "subscribers": "2.6M subscribers",
+        },
+        "UCVHFbqXqoYvEWM1Ddxl0QDg": {
+            "title": "Python",
+            "description": "Official Python Software Foundation updates and tutorials.",
+            "subscribers": "600K subscribers",
+        },
+    },
+    "playlists": {
+        "PL590L5WQmH8fJ54FqA0bG8TPEj-UZ_J1b": {
+            "title": "YouTube Developers Live",
+            "description": "Sessions exploring the YouTube API and developer tooling.",
+            "items": "25 videos",
+        },
+        "PLAwxTw4SYaPnMwH8bJ5rE2l78G_uuNzhf": {
+            "title": "FastAPI Tutorials",
+            "description": "A curated list of introductory FastAPI tutorials.",
+            "items": "12 videos",
+        },
+    },
+    "videos": {
+        "CYlon2tvywA": {
+            "title": "Introducing MyTube",
+            "description": "An overview of the MyTube Chromecast remote prototype.",
+            "duration": "9 minutes",
+        },
+        "kLhFQnK0HXg": {
+            "title": "FastAPI in 15 Minutes",
+            "description": "A rapid introduction to building web apps with FastAPI.",
+            "duration": "15 minutes",
+        },
+    },
+}
 
-        const showModal = (devices) => {{
-          if (!modal || !deviceList) {{
-            redirectToCast();
-            return;
-          }}
-          deviceList.innerHTML = "";
-          devices.forEach((device) => {{
-            const item = document.createElement("li");
-            const button = document.createElement("button");
-            button.type = "button";
-            button.textContent = device;
-            button.addEventListener("click", () => {{
-              hideModal();
-              redirectToCast(device);
-            }});
-            item.appendChild(button);
-            deviceList.appendChild(item);
-          }});
-          modal.classList.remove("hidden");
-        }};
 
-        castLink.addEventListener("click", async (event) => {{
-          event.preventDefault();
-          try {{
-            const response = await fetch("{devices_url}");
-            if (!response.ok) {{
-              throw new Error("Failed to load devices");
-            }}
-            const payload = await response.json();
-            const devices = Array.isArray(payload.devices) ? payload.devices : [];
-            if (devices.length <= 1) {{
-              redirectToCast(devices[0]);
-              return;
-            }}
-            showModal(devices);
-          }} catch (error) {{
-            console.error(error);
-            redirectToCast();
-          }}
-        }});
+def _validate_section(section: str) -> str:
+    normalized = section.lower()
+    if normalized not in CONFIG_LABELS:
+        raise HTTPException(status_code=404, detail="Unknown configuration section")
+    return normalized
 
-        if (cancelButton) {{
-          cancelButton.addEventListener("click", () => {{
-            hideModal();
-          }});
-        }}
 
-        if (modal) {{
-          modal.addEventListener("click", (event) => {{
-            if (event.target === modal) {{
-              hideModal();
-            }}
-          }});
-        }}
-      }})();
-    </script>
-  </body>
-</html>
-"""
+def _navigation_links(app: FastAPI, active_section: str | None) -> list[dict[str, str | bool]]:
+    links: list[dict[str, str | bool]] = []
+    for slug, label in CONFIG_NAVIGATION:
+        links.append(
+            {
+                "url": app.url_path_for("configure_section", section=slug),
+                "label": label,
+                "active": active_section == slug,
+            }
+        )
+    return links
+
+
+def _render_config_page(
+    request: Request,
+    app: FastAPI,
+    *,
+    heading: str,
+    active_section: str | None,
+    content: str,
+    form_action: str | None = None,
+    resource_value: str = "",
+) -> HTMLResponse:
+    navigation = _navigation_links(app, active_section)
+    action = form_action or app.url_path_for(
+        "create_resource", section=active_section or CONFIG_NAVIGATION[0][0]
+    )
+    return templates.TemplateResponse(
+        "configure.html",
+        {
+            "request": request,
+            "heading": heading,
+            "navigation": navigation,
+            "form_action": action,
+            "resource_value": resource_value,
+            "content_html": content,
+        },
+    )
+
+
+def _section_overview_content(section: str) -> str:
+    resources = HARD_CODED_RESOURCES.get(section, {})
+    if not resources:
+        return "<section><p>No example resources available.</p></section>"
+    items = []
+    for resource_id, details in resources.items():
+        escaped_id = html.escape(resource_id)
+        title = html.escape(details.get("title", "Unnamed"))
+        list_items = [f"<dt>ID</dt><dd>{escaped_id}</dd>"]
+        for key, value in details.items():
+            escaped_key = html.escape(key.replace("_", " ").title())
+            escaped_value = html.escape(value)
+            list_items.append(f"<dt>{escaped_key}</dt><dd>{escaped_value}</dd>")
+        detail_list = "".join(list_items)
+        items.append(
+            "<section>"
+            f"<h2>{title}</h2>"
+            f"<p>Preview of stored metadata for <code>{escaped_id}</code>.</p>"
+            f"<dl>{detail_list}</dl>"
+            "</section>"
+        )
+    return "".join(items)
+
+
+def _resource_detail_content(section: str, resource_id: str, list_choice: str | None) -> str:
+    resources = HARD_CODED_RESOURCES.get(section, {})
+    resource = resources.get(resource_id)
+    escaped_id = html.escape(resource_id)
+    label = CONFIG_LABELS.get(section, section.title())
+    list_summary = (
+        f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
+        if list_choice in LIST_LABELS
+        else ""
+    )
+    if not resource:
+        return (
+            "<section>"
+            f"<h2>New {html.escape(label)} Resource</h2>"
+            f"<p>No stored metadata for <code>{escaped_id}</code> yet."
+            f"{list_summary}"
+            "<p>This demo view uses hard-coded data. Persisted storage will be added later.</p>"
+            "</section>"
+        )
+
+    details = [f"<dt>ID</dt><dd>{escaped_id}</dd>"]
+    for key, value in resource.items():
+        details.append(
+            f"<dt>{html.escape(key.replace('_', ' ').title())}</dt><dd>{html.escape(value)}</dd>"
+        )
+    detail_list = "".join(details)
+    title = html.escape(resource.get("title", f"{label} Resource"))
+    return (
+        "<section>"
+        f"<h2>{title}</h2>"
+        f"<p>Preview data for <code>{escaped_id}</code> in the configuration workspace.</p>"
+        f"{list_summary}"
+        f"<dl>{detail_list}</dl>"
+        "</section>"
+    )
 
 
 def create_app() -> FastAPI:
@@ -153,22 +190,99 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="MyTube Remote")
 
-    def _render(status: str | None = None) -> HTMLResponse:
-        status_block = ""
-        if status:
-            safe_status = html.escape(status)
-            status_block = f"    <p class=\"status\">{safe_status}</p>\n"
+    if static_directory.exists():
+        app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
-        html_content = TEMPLATE.format(
-            cast_url=app.url_path_for("cast_featured"),
-            devices_url=app.url_path_for("list_devices"),
-            status_block=status_block,
+    def _render(request: Request, status: str | None = None) -> HTMLResponse:
+        return templates.TemplateResponse(
+            "home.html",
+            {
+                "request": request,
+                "cast_url": app.url_path_for("cast_featured"),
+                "devices_url": app.url_path_for("list_devices"),
+                "status": status,
+            },
         )
-        return HTMLResponse(html_content)
 
     @app.get("/", response_class=HTMLResponse)
-    async def home() -> HTMLResponse:
-        return _render()
+    async def home(request: Request) -> HTMLResponse:
+        return _render(request)
+
+    @app.get("/configure", response_class=HTMLResponse)
+    async def configure_home(request: Request) -> HTMLResponse:
+        content = (
+            "<section>"
+            "<h2>Welcome to the configuration workspace</h2>"
+            "<p>Use the menu above to manage channels, playlists, or videos."
+            " Enter a YouTube identifier and choose whether it belongs to the whitelist"
+            " or blacklist to preview how the resource will appear.</p>"
+            "</section>"
+        )
+        return _render_config_page(
+            request,
+            app,
+            heading="Configure MyTube",
+            active_section=None,
+            content=content,
+            form_action=app.url_path_for("create_resource", section="channels"),
+        )
+
+    @app.get("/configure/{section}", response_class=HTMLResponse, name="configure_section")
+    async def configure_section(request: Request, section: str) -> HTMLResponse:
+        normalized_section = _validate_section(section)
+        content = _section_overview_content(normalized_section)
+        heading = f"Manage {CONFIG_LABELS[normalized_section]}"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section=normalized_section,
+            content=content,
+            form_action=app.url_path_for("create_resource", section=normalized_section),
+        )
+
+    @app.post("/configure/{section}", name="create_resource")
+    async def create_resource(
+        section: str,
+        resource_id: str = Form(..., alias="resource_id"),
+        list_choice: str = Form(..., alias="list"),
+    ) -> RedirectResponse:
+        normalized_section = _validate_section(section)
+        stripped_resource_id = resource_id.strip()
+        if not stripped_resource_id:
+            raise HTTPException(status_code=400, detail="Resource ID is required")
+        if list_choice not in LIST_LABELS:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
+
+        resource_url = app.url_path_for(
+            "view_resource", section=normalized_section, resource_id=stripped_resource_id
+        )
+        redirect_url = f"{resource_url}?list={list_choice}"
+        return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.get(
+        "/configure/{section}/{resource_id}",
+        response_class=HTMLResponse,
+        name="view_resource",
+    )
+    async def view_resource(
+        request: Request,
+        section: str,
+        resource_id: str,
+        list: str | None = None,
+    ) -> HTMLResponse:
+        normalized_section = _validate_section(section)
+        content = _resource_detail_content(normalized_section, resource_id, list)
+        heading = f"{CONFIG_LABELS[normalized_section]} Resource"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section=normalized_section,
+            content=content,
+            form_action=app.url_path_for("create_resource", section=normalized_section),
+            resource_value=resource_id,
+        )
 
     @app.get("/devices")
     async def list_devices() -> dict[str, list[str]]:
@@ -176,21 +290,21 @@ def create_app() -> FastAPI:
         return {"devices": devices}
 
     @app.get("/cast", response_class=HTMLResponse)
-    async def cast_featured(device: str | None = None) -> HTMLResponse:
+    async def cast_featured(request: Request, device: str | None = None) -> HTMLResponse:
         try:
             result: CastResult = await run_in_threadpool(
                 cast_youtube_video, YOUTUBE_VIDEO_ID, device_name=device
             )
         except ChromecastUnavailableError as exc:  # pragma: no cover - network hardware required
             logger.warning("Chromecast unavailable: %s", exc)
-            return _render(str(exc))
+            return _render(request, str(exc))
 
         status = (
             "Casting YouTube video "
             f"https://youtu.be/{result.video_id} to Chromecast '{result.device_name}'."
         )
         logger.info("%s", status)
-        return _render(status)
+        return _render(request, status)
 
     return app
 

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>MyTube Configuration</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='configure.css') }}">
+  </head>
+  <body>
+    <header>
+      <h1>{{ heading }}</h1>
+      <nav class="configure-menu">
+        {% for link in navigation %}
+        <a class="configure-link{% if link.active %} active{% endif %}" href="{{ link.url }}">{{ link.label }}</a>
+        {% endfor %}
+      </nav>
+      <form class="resource-form" method="post" action="{{ form_action }}">
+        <label for="resource-id">Resource ID</label>
+        <input id="resource-id" name="resource_id" type="text" value="{{ resource_value }}" placeholder="Enter a YouTube ID" required>
+        <button type="submit" name="list" value="white" title="Add to whitelist">👍</button>
+        <button type="submit" name="list" value="black" title="Add to blacklist">👎</button>
+      </form>
+    </header>
+    <main class="configure-content">
+      {{ content_html | safe }}
+    </main>
+  </body>
+</html>
