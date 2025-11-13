@@ -26,11 +26,13 @@ from .db import (
     fetch_all_channels,
     fetch_all_videos,
     fetch_channel,
+    fetch_channel_sections,
     fetch_playlist,
     fetch_playlist_items,
     fetch_video,
     initialize_database,
     save_channel,
+    save_channel_sections,
     save_playlist,
     save_playlist_items,
     save_video,
@@ -38,6 +40,7 @@ from .db import (
 )
 from .youtube import (
     fetch_youtube_playlist,
+    fetch_youtube_channel_sections,
     fetch_youtube_section_data,
     load_youtube_api_key,
 )
@@ -296,7 +299,7 @@ def _resource_detail_content(section: str, resource_id: str, list_choice: str | 
     )
 
 
-def _channel_resource_content(channel: dict | None) -> str:
+def _channel_resource_content(channel: dict | None, sections: list[dict]) -> str:
     if not channel:
         return (
             "<section>"
@@ -322,12 +325,34 @@ def _channel_resource_content(channel: dict | None) -> str:
         f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
     )
 
+    if sections:
+        section_items: list[str] = []
+        for section in sections:
+            title_text = section.get("title")
+            if not title_text:
+                raw = section.get("raw_json") or {}
+                snippet = raw.get("snippet") if isinstance(raw, dict) else {}
+                title_text = (snippet or {}).get("title") or section.get("id") or "Untitled"
+            section_items.append(f"<li>{html.escape(title_text)}</li>")
+        sections_html = (
+            "<h3>Channel Sections</h3>"
+            "<ol>"
+            f"{''.join(section_items)}"
+            "</ol>"
+        )
+    else:
+        sections_html = (
+            "<h3>Channel Sections</h3>"
+            "<p><em>No channel sections stored.</em></p>"
+        )
+
     return (
         "<section>"
         f"<h2>{title} {vote}</h2>"
         f"<p><small>ID: {channel_id}</small></p>"
         f"{description_html}"
         f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
+        f"{sections_html}"
         "</section>"
     )
 
@@ -555,8 +580,21 @@ def create_app() -> FastAPI:
             if label is None:
                 raise HTTPException(status_code=400, detail="Unknown list selection")
 
+            sections_items: list[dict[str, Any]] = []
+            if channel_data.get("id"):
+                _, sections_data = await fetch_youtube_channel_sections(
+                    channel_data["id"], api_key
+                )
+                sections_items = sections_data.get("items") or []
+            retrieved_at = datetime.now(timezone.utc)
+
             def _persist_channel() -> None:
-                save_channel(channel_data, retrieved_at=datetime.now(timezone.utc))
+                save_channel(channel_data, retrieved_at=retrieved_at)
+                save_channel_sections(
+                    channel_id,
+                    sections_items,
+                    retrieved_at=retrieved_at,
+                )
                 set_resource_label("channel", channel_id, label)
 
             await run_in_threadpool(_persist_channel)
@@ -625,7 +663,10 @@ def create_app() -> FastAPI:
             )
         elif normalized_section == "channels":
             channel = await run_in_threadpool(fetch_channel, resource_id)
-            content = _channel_resource_content(channel)
+            channel_sections = await run_in_threadpool(
+                fetch_channel_sections, resource_id
+            )
+            content = _channel_resource_content(channel, channel_sections)
         elif normalized_section == "videos":
             video = await run_in_threadpool(fetch_video, resource_id)
             content = _video_resource_content(video)

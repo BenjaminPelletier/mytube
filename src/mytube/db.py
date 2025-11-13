@@ -68,6 +68,18 @@ class Channel(SQLModel, table=True):
     retrieved_at: str = Field(nullable=False)
 
 
+class ChannelSection(SQLModel, table=True):
+    """SQLModel representation of a channel section."""
+
+    __tablename__ = "channel_sections"
+
+    id: str = Field(primary_key=True)
+    channel_id: str = Field(index=True)
+    title: str | None = None
+    raw_json: str = Field(nullable=False)
+    retrieved_at: str = Field(nullable=False)
+
+
 class Video(SQLModel, table=True):
     """SQLModel representation of a video."""
 
@@ -243,6 +255,44 @@ def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
         session.commit()
 
 
+def save_channel_sections(
+    channel_id: str, sections: Iterable[dict], *, retrieved_at: datetime
+) -> None:
+    """Insert or update YouTube channel section records."""
+
+    if not channel_id:
+        raise ValueError("Channel sections require a channel identifier")
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = section.get("id")
+            if not section_id:
+                continue
+            snippet = section.get("snippet") or {}
+            title = snippet.get("title")
+            raw_json = json.dumps(section, separators=(",", ":"))
+            existing = session.get(ChannelSection, section_id)
+            if existing:
+                existing.channel_id = channel_id
+                existing.title = title
+                existing.raw_json = raw_json
+                existing.retrieved_at = retrieved_at.isoformat()
+            else:
+                session.add(
+                    ChannelSection(
+                        id=section_id,
+                        channel_id=channel_id,
+                        title=title,
+                        raw_json=raw_json,
+                        retrieved_at=retrieved_at.isoformat(),
+                    )
+                )
+        session.commit()
+
+
 def save_video(video: dict, *, retrieved_at: datetime) -> None:
     """Insert or update a YouTube video record."""
 
@@ -297,6 +347,29 @@ def fetch_channel(channel_id: str) -> dict | None:
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
     }
+
+
+def fetch_channel_sections(channel_id: str) -> list[dict]:
+    """Fetch stored channel section records for a channel."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(ChannelSection)
+            .where(ChannelSection.channel_id == channel_id)
+            .order_by(ChannelSection.title.is_(None), ChannelSection.title, ChannelSection.id)
+        )
+        rows = session.exec(statement).all()
+    return [
+        {
+            "id": row.id,
+            "channel_id": row.channel_id,
+            "title": row.title,
+            "raw_json": json.loads(row.raw_json),
+            "retrieved_at": row.retrieved_at,
+        }
+        for row in rows
+    ]
 
 
 def fetch_video(video_id: str) -> dict | None:
@@ -453,8 +526,10 @@ __all__ = [
     "save_playlist",
     "fetch_playlist",
     "save_channel",
+    "save_channel_sections",
     "save_video",
     "fetch_channel",
+    "fetch_channel_sections",
     "fetch_video",
     "fetch_all_channels",
     "fetch_all_videos",
