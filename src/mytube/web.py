@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
+import os
 from pathlib import Path
+from typing import Any
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette import status
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse
 
 from .casting import (
     CastResult,
@@ -185,6 +190,105 @@ def _resource_detail_content(section: str, resource_id: str, list_choice: str | 
     )
 
 
+def _load_youtube_api_key() -> str:
+    key = os.environ.get("YOUTUBE_API_KEY")
+    if key:
+        stripped = key.strip()
+        if stripped:
+            return stripped
+
+    key_path = Path.cwd() / ".youtube-api"
+    if key_path.exists():
+        file_key = key_path.read_text(encoding="utf-8").strip()
+        if file_key:
+            return file_key
+
+    raise HTTPException(status_code=500, detail="YouTube API key is not configured")
+
+
+def _youtube_api_request(endpoint: str, params: dict[str, str]) -> tuple[str, dict[str, Any]]:
+    query = urllib.parse.urlencode(params)
+    url = f"https://www.googleapis.com/youtube/v3/{endpoint}?{query}"
+    try:
+        with urllib.request.urlopen(url) as response:
+            charset = response.headers.get_content_charset("utf-8")
+            payload = response.read().decode(charset)
+    except urllib.error.HTTPError as exc:  # pragma: no cover - network response paths
+        try:
+            error_body = exc.read().decode("utf-8", "ignore")
+        except Exception:  # pragma: no cover - defensive
+            error_body = ""
+        detail = error_body or exc.reason
+        raise HTTPException(status_code=exc.code, detail=f"YouTube API error: {detail}") from exc
+    except urllib.error.URLError as exc:  # pragma: no cover - network response paths
+        raise HTTPException(
+            status_code=502, detail=f"Failed to contact YouTube API: {exc.reason}"
+        ) from exc
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=502, detail="Invalid response from YouTube API") from exc
+    return url, data
+
+
+async def _fetch_youtube_section_data(
+    section: str, resource_id: str, api_key: str
+) -> tuple[str, dict[str, Any]]:
+    if section == "playlists":
+        params = {
+            "part": "snippet,contentDetails",
+            "playlistId": resource_id,
+            "maxResults": "50",
+            "key": api_key,
+        }
+        endpoint = "playlistItems"
+    elif section == "channels":
+        params = {
+            "part": "snippet,statistics",
+            "key": api_key,
+        }
+        if resource_id.startswith("@"):  # Handle input
+            params["forHandle"] = resource_id[1:]
+        else:
+            params["id"] = resource_id
+        endpoint = "channels"
+    elif section == "videos":
+        params = {
+            "part": "snippet,contentDetails,statistics",
+            "id": resource_id,
+            "key": api_key,
+        }
+        endpoint = "videos"
+    else:  # pragma: no cover - unreachable due to validation
+        raise HTTPException(status_code=400, detail="Unsupported section for API lookup")
+
+    return await run_in_threadpool(_youtube_api_request, endpoint, params)
+
+
+def _api_response_content(
+    resource_id: str,
+    list_choice: str,
+    request_url: str,
+    response_data: dict[str, Any],
+) -> str:
+    escaped_id = html.escape(resource_id)
+    json_payload = html.escape(json.dumps(response_data, indent=2, sort_keys=True))
+    list_summary = (
+        f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
+        if list_choice in LIST_LABELS
+        else ""
+    )
+    return (
+        "<section>"
+        f"<h2>YouTube API response for <code>{escaped_id}</code></h2>"
+        f"{list_summary}"
+        f"<p><strong>Endpoint:</strong> {html.escape(request_url)}</p>"
+        f"<pre class=\"api-response\">{json_payload}</pre>"
+        "</section>"
+    )
+
+
 def create_app() -> FastAPI:
     """Create a configured FastAPI application instance."""
 
@@ -243,10 +347,11 @@ def create_app() -> FastAPI:
 
     @app.post("/configure/{section}", name="create_resource")
     async def create_resource(
+        request: Request,
         section: str,
         resource_id: str = Form(..., alias="resource_id"),
         list_choice: str = Form(..., alias="list"),
-    ) -> RedirectResponse:
+    ) -> HTMLResponse:
         normalized_section = _validate_section(section)
         stripped_resource_id = resource_id.strip()
         if not stripped_resource_id:
@@ -254,11 +359,23 @@ def create_app() -> FastAPI:
         if list_choice not in LIST_LABELS:
             raise HTTPException(status_code=400, detail="Unknown list selection")
 
-        resource_url = app.url_path_for(
-            "view_resource", section=normalized_section, resource_id=stripped_resource_id
+        api_key = _load_youtube_api_key()
+        request_url, response_data = await _fetch_youtube_section_data(
+            normalized_section, stripped_resource_id, api_key
         )
-        redirect_url = f"{resource_url}?list={list_choice}"
-        return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+        content = _api_response_content(
+            stripped_resource_id, list_choice, request_url, response_data
+        )
+        heading = f"{CONFIG_LABELS[normalized_section]} API Preview"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section=normalized_section,
+            content=content,
+            form_action=app.url_path_for("create_resource", section=normalized_section),
+            resource_value=stripped_resource_id,
+        )
 
     @app.get(
         "/configure/{section}/{resource_id}",
