@@ -23,7 +23,7 @@ def load_youtube_api_key() -> str:
         if stripped:
             return stripped
 
-    key_path = Path.cwd() / ".youtube-api"
+    key_path = Path.cwd() / ".youtube-apikey"
     if key_path.exists():
         file_key = key_path.read_text(encoding="utf-8").strip()
         if file_key:
