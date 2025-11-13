@@ -229,7 +229,13 @@ def fetch_all_playlists() -> list[dict]:
     engine = _get_engine()
     with Session(engine) as session:
         statement = (
-            select(Playlist.id, Playlist.title, Playlist.retrieved_at, ResourceLabel.label)
+            select(
+                Playlist.id,
+                Playlist.title,
+                Playlist.raw_json,
+                Playlist.retrieved_at,
+                ResourceLabel.label,
+            )
             .select_from(Playlist)
             .join(
                 ResourceLabel,
@@ -246,15 +252,32 @@ def fetch_all_playlists() -> list[dict]:
             )
         )
         rows = session.exec(statement).all()
-    return [
-        {
-            "id": row[0],
-            "title": row[1],
-            "retrieved_at": row[2],
-            "label": row[3],
-        }
-        for row in rows
-    ]
+
+    results: list[dict] = []
+    for playlist_id, title, raw_json, retrieved_at, label in rows:
+        channel_id: str | None = None
+        channel_title: str | None = None
+        if raw_json:
+            try:
+                payload = json.loads(raw_json)
+            except json.JSONDecodeError:
+                payload = {}
+            snippet = payload.get("snippet") if isinstance(payload, dict) else {}
+            if isinstance(snippet, dict):
+                channel_id = snippet.get("channelId")
+                channel_title = snippet.get("channelTitle")
+        results.append(
+            {
+                "id": playlist_id,
+                "title": title,
+                "retrieved_at": retrieved_at,
+                "label": label,
+                "channel_id": channel_id,
+                "channel_title": channel_title,
+            }
+        )
+
+    return results
 
 
 def save_channel(channel: dict, *, retrieved_at: datetime) -> None:

@@ -240,17 +240,29 @@ def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
         playlist_id = playlist.get("id") or ""
         if not playlist_id:
             continue
+
         title = playlist.get("title") or playlist_id
-        retrieved_at = playlist.get("retrieved_at") or "Unknown"
         vote = _resource_vote(playlist.get("label"))
-        encoded_id = quote(playlist_id, safe="")
-        link = f"<a href=\"/configure/playlists/{encoded_id}\">{html.escape(title)}</a>"
+        encoded_playlist_id = quote(playlist_id, safe="")
+        playlist_link = (
+            f"<a href=\"/configure/playlists/{encoded_playlist_id}\">{html.escape(title)}</a>"
+        )
+
+        channel_id = playlist.get("channel_id") or ""
+        channel_title = playlist.get("channel_title") or channel_id or "Unknown channel"
+        if channel_id:
+            encoded_channel_id = quote(channel_id, safe="")
+            channel_display = (
+                f"<a href=\"/configure/channels/{encoded_channel_id}\">"
+                f"{html.escape(channel_title)}"
+                "</a>"
+            )
+        else:
+            channel_display = html.escape(channel_title)
+
         vote_display = f" {vote}" if vote else ""
         items.append(
-            "<li>"
-            f"{link}{vote_display}"
-            f"<br><small>Retrieved: {html.escape(retrieved_at)}</small>"
-            "</li>"
+            f"<li>[{channel_display}] {playlist_link}{vote_display}</li>"
         )
 
     if not items:
@@ -339,8 +351,24 @@ def _playlist_resource_content(
     escaped_id = html.escape(playlist_id)
     if playlist:
         title = html.escape(playlist.get("title") or playlist_id)
+        raw_data = playlist.get("raw_json") if isinstance(playlist, dict) else None
+        snippet = raw_data.get("snippet") if isinstance(raw_data, dict) else {}
+        channel_id = snippet.get("channelId") if isinstance(snippet, dict) else None
+        channel_title = snippet.get("channelTitle") if isinstance(snippet, dict) else None
+        channel_line = ""
+        if channel_id or channel_title:
+            channel_title_text = html.escape(channel_title or channel_id or "")
+            if channel_id:
+                encoded_channel_id = quote(channel_id, safe="")
+                channel_display = (
+                    f"<a href=\"/configure/channels/{encoded_channel_id}\">{channel_title_text}</a>"
+                )
+            else:
+                channel_display = channel_title_text
+            channel_line = f"<p>{channel_display}</p>"
         heading = (
             f"<h2>{title}</h2>"
+            f"{channel_line}"
             f"<p><small>ID: {escaped_id}</small></p>"
         )
     else:
@@ -363,7 +391,26 @@ def _playlist_resource_content(
     for item in playlist_items:
         snippet = item.get("snippet") or {}
         title = snippet.get("title") or "Untitled item"
-        titles.append(f"<li>{html.escape(title)}</li>")
+
+        video_id = None
+        resource = snippet.get("resourceId") if isinstance(snippet, dict) else None
+        if isinstance(resource, dict):
+            if resource.get("kind") == "youtube#video":
+                video_id = resource.get("videoId")
+            video_id = video_id or resource.get("videoId")
+        if not video_id:
+            content_details = item.get("contentDetails")
+            if isinstance(content_details, dict):
+                video_id = content_details.get("videoId")
+
+        title_text = html.escape(title)
+        if video_id:
+            encoded_video_id = quote(str(video_id), safe="")
+            title_text = (
+                f"<a href=\"/configure/videos/{encoded_video_id}\">{title_text}</a>"
+            )
+
+        titles.append(f"<li>{title_text}</li>")
     items_html = "".join(titles)
     return (
         "<section>"
