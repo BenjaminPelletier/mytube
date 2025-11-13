@@ -328,6 +328,56 @@ def fetch_resource_label(
         return _query(conn)
 
 
+def fetch_all_channels() -> list[dict]:
+    """Return stored channel records including their labels."""
+
+    with _get_connection() as connection:
+        cursor = connection.execute(
+            """
+            SELECT c.id, c.title, c.retrieved_at, rl.label
+            FROM channels AS c
+            LEFT JOIN resource_labels AS rl
+                ON rl.resource_type = 'channel' AND rl.resource_id = c.id
+            ORDER BY (rl.label IS NULL), datetime(c.retrieved_at) DESC, c.id
+            """
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "retrieved_at": row["retrieved_at"],
+            "label": row["label"],
+        }
+        for row in rows
+    ]
+
+
+def fetch_all_videos() -> list[dict]:
+    """Return stored video records including their labels."""
+
+    with _get_connection() as connection:
+        cursor = connection.execute(
+            """
+            SELECT v.id, v.title, v.retrieved_at, rl.label
+            FROM videos AS v
+            LEFT JOIN resource_labels AS rl
+                ON rl.resource_type = 'video' AND rl.resource_id = v.id
+            ORDER BY (rl.label IS NULL), datetime(v.retrieved_at) DESC, v.id
+            """
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "retrieved_at": row["retrieved_at"],
+            "label": row["label"],
+        }
+        for row in rows
+    ]
+
+
 __all__ = [
     "initialize_database",
     "save_playlist_items",
@@ -336,6 +386,8 @@ __all__ = [
     "save_video",
     "fetch_channel",
     "fetch_video",
+    "fetch_all_channels",
+    "fetch_all_videos",
     "set_resource_label",
     "fetch_resource_label",
 ]
