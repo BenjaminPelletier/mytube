@@ -12,7 +12,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from .casting import (
     CastResult,
@@ -308,7 +308,7 @@ def create_app() -> FastAPI:
         section: str,
         resource_id: str = Form(..., alias="resource_id"),
         list_choice: str = Form(..., alias="list"),
-    ) -> HTMLResponse | RedirectResponse:
+    ) -> Response:
         normalized_section = _validate_section(section)
         stripped_resource_id = resource_id.strip()
         if not stripped_resource_id:
