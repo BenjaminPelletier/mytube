@@ -12,7 +12,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from .casting import (
     CastResult,
@@ -20,6 +20,7 @@ from .casting import (
     cast_youtube_video,
     discover_chromecast_names,
 )
+from .db import fetch_playlist_items, initialize_database, save_playlist_items
 from .youtube import fetch_youtube_section_data, load_youtube_api_key
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,40 @@ def _resource_detail_content(section: str, resource_id: str, list_choice: str | 
     )
 
 
+def _playlist_resource_content(
+    playlist_id: str, playlist_items: list[dict[str, Any]], list_choice: str | None
+) -> str:
+    escaped_id = html.escape(playlist_id)
+    list_summary = (
+        f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
+        if list_choice in LIST_LABELS
+        else ""
+    )
+    if not playlist_items:
+        return (
+            "<section>"
+            f"<h2>Playlist <code>{escaped_id}</code></h2>"
+            f"{list_summary}"
+            "<p>No stored playlist items for this playlist.</p>"
+            "</section>"
+        )
+
+    titles = []
+    for item in playlist_items:
+        snippet = item.get("snippet") or {}
+        title = snippet.get("title") or "Untitled item"
+        titles.append(f"<li>{html.escape(title)}</li>")
+    items_html = "".join(titles)
+    return (
+        "<section>"
+        f"<h2>Playlist <code>{escaped_id}</code></h2>"
+        f"{list_summary}"
+        "<p>Stored playlist item titles:</p>"
+        f"<ol>{items_html}</ol>"
+        "</section>"
+    )
+
+
 def _api_response_content(
     resource_id: str,
     list_choice: str,
@@ -213,6 +248,7 @@ def _api_response_content(
 def create_app() -> FastAPI:
     """Create a configured FastAPI application instance."""
 
+    initialize_database()
     app = FastAPI(title="MyTube Remote")
 
     if static_directory.exists():
@@ -272,7 +308,7 @@ def create_app() -> FastAPI:
         section: str,
         resource_id: str = Form(..., alias="resource_id"),
         list_choice: str = Form(..., alias="list"),
-    ) -> HTMLResponse:
+    ) -> Response:
         normalized_section = _validate_section(section)
         stripped_resource_id = resource_id.strip()
         if not stripped_resource_id:
@@ -284,6 +320,20 @@ def create_app() -> FastAPI:
         request_url, response_data = await fetch_youtube_section_data(
             normalized_section, stripped_resource_id, api_key
         )
+        if normalized_section == "playlists":
+            playlist_items = response_data.get("items", [])
+            await run_in_threadpool(
+                save_playlist_items, stripped_resource_id, playlist_items
+            )
+            redirect_url = app.url_path_for(
+                "view_resource",
+                section=normalized_section,
+                resource_id=stripped_resource_id,
+            )
+            if list_choice in LIST_LABELS:
+                redirect_url = f"{redirect_url}?list={list_choice}"
+            return RedirectResponse(redirect_url, status_code=303)
+
         content = _api_response_content(
             stripped_resource_id, list_choice, request_url, response_data
         )
@@ -310,7 +360,13 @@ def create_app() -> FastAPI:
         list: str | None = None,
     ) -> HTMLResponse:
         normalized_section = _validate_section(section)
-        content = _resource_detail_content(normalized_section, resource_id, list)
+        if normalized_section == "playlists":
+            playlist_items = await run_in_threadpool(
+                fetch_playlist_items, resource_id
+            )
+            content = _playlist_resource_content(resource_id, playlist_items, list)
+        else:
+            content = _resource_detail_content(normalized_section, resource_id, list)
         heading = f"{CONFIG_LABELS[normalized_section]} Resource"
         return _render_config_page(
             request,
