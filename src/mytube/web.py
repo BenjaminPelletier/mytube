@@ -42,6 +42,7 @@ from .db import (
 from .youtube import (
     fetch_youtube_playlist,
     fetch_youtube_channel_sections,
+    fetch_youtube_playlists,
     fetch_youtube_section_data,
     load_youtube_api_key,
 )
@@ -536,6 +537,39 @@ def create_app() -> FastAPI:
                     channel_data["id"], api_key
                 )
                 sections_items = sections_data.get("items") or []
+            playlist_ids: list[str] = []
+            playlist_id_set: set[str] = set()
+            for section in sections_items:
+                if not isinstance(section, dict):
+                    continue
+                content_details = section.get("contentDetails") or {}
+                playlists = content_details.get("playlists") or []
+                for playlist_id in playlists:
+                    if (
+                        isinstance(playlist_id, str)
+                        and playlist_id
+                        and playlist_id not in playlist_id_set
+                    ):
+                        playlist_id_set.add(playlist_id)
+                        playlist_ids.append(playlist_id)
+            playlist_metadata_map: dict[str, dict[str, Any]] = {}
+            if playlist_ids:
+                playlist_metadata_items = await fetch_youtube_playlists(
+                    playlist_ids, api_key
+                )
+                playlist_metadata_map = {
+                    item.get("id"): item
+                    for item in playlist_metadata_items
+                    if isinstance(item, dict) and item.get("id")
+                }
+            playlist_items_map: dict[str, list[dict[str, Any]]] = {}
+            for playlist_id in playlist_ids:
+                _, playlist_items_response = await fetch_youtube_section_data(
+                    "playlists", playlist_id, api_key
+                )
+                playlist_items_map[playlist_id] = (
+                    playlist_items_response.get("items") or []
+                )
             retrieved_at = datetime.now(timezone.utc)
 
             def _persist_channel() -> None:
@@ -545,6 +579,12 @@ def create_app() -> FastAPI:
                     sections_items,
                     retrieved_at=retrieved_at,
                 )
+                for playlist_id in playlist_ids:
+                    items_to_save = playlist_items_map.get(playlist_id) or []
+                    save_playlist_items(playlist_id, items_to_save)
+                    playlist_metadata = playlist_metadata_map.get(playlist_id)
+                    if playlist_metadata:
+                        save_playlist(playlist_metadata, retrieved_at=retrieved_at)
                 set_resource_label("channel", channel_id, label)
 
             await run_in_threadpool(_persist_channel)
