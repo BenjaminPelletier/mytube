@@ -68,9 +68,9 @@ CONFIG_NAVIGATION = RESOURCE_NAVIGATION + LIST_NAVIGATION
 RESOURCE_LABELS = {slug: label for slug, label in RESOURCE_NAVIGATION}
 LIST_PAGE_LABELS = {slug: label for slug, label in LIST_NAVIGATION}
 LIST_PAGE_FIELDS = {"whitelist": "whitelisted_by", "blacklist": "blacklisted_by"}
-LISTED_VIDEO_FIELD_LABELS = {
-    "whitelisted_by": "Whitelisted by",
-    "blacklisted_by": "Blacklisted by",
+LISTED_VIDEO_FIELD_PREFIXES = {
+    "whitelisted_by": "👍",
+    "blacklisted_by": "👎",
 }
 
 LIST_LABELS = {"white": "Whitelist", "black": "Blacklist"}
@@ -258,11 +258,11 @@ def _listed_videos_content(
 
     heading_label = LIST_PAGE_LABELS.get(list_slug, list_slug.title())
     primary_field = LIST_PAGE_FIELDS[list_slug]
-    primary_label = LISTED_VIDEO_FIELD_LABELS[primary_field]
+    primary_prefix = LISTED_VIDEO_FIELD_PREFIXES[primary_field]
     secondary_field = (
         "blacklisted_by" if primary_field == "whitelisted_by" else "whitelisted_by"
     )
-    secondary_label = LISTED_VIDEO_FIELD_LABELS[secondary_field]
+    secondary_prefix = LISTED_VIDEO_FIELD_PREFIXES[secondary_field]
 
     button_html = (
         f"<form class=\"regenerate-form\" method=\"post\" action=\"{html.escape(regenerate_url)}\">"
@@ -298,7 +298,7 @@ def _listed_videos_content(
         if primary_values:
             joined_primary = ", ".join(html.escape(value) for value in primary_values)
             identifier_lines.append(
-                f"<small>{primary_label}: {joined_primary}</small>"
+                f"<small>{primary_prefix} {joined_primary}</small>"
             )
         secondary_values = [
             value
@@ -308,7 +308,7 @@ def _listed_videos_content(
         if secondary_values:
             joined_secondary = ", ".join(html.escape(value) for value in secondary_values)
             identifier_lines.append(
-                f"<small>{secondary_label}: {joined_secondary}</small>"
+                f"<small>{secondary_prefix} {joined_secondary}</small>"
             )
         identifiers_html = "<br>".join(identifier_lines)
         if identifiers_html:
@@ -316,7 +316,6 @@ def _listed_videos_content(
         items.append(
             "<li>"
             f"{link}"
-            f"<br><small>ID: {html.escape(video_id)}</small>"
             f"{identifiers_html}"
             "</li>"
         )
