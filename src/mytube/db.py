@@ -3,93 +3,110 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
+
+from sqlalchemy import CheckConstraint, and_, delete
+from sqlalchemy.engine import Engine
+from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 DB_PATH = Path.cwd() / "data" / "mytube.db"
 
+_engine: Engine | None = None
 
-def _get_connection() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
+
+def _get_engine() -> Engine:
+    """Create (or reuse) the SQLite engine."""
+
+    global _engine
+    if _engine is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _engine = create_engine(
+            f"sqlite:///{DB_PATH}",
+            echo=False,
+            connect_args={"check_same_thread": False},
+        )
+    return _engine
+
+
+class PlaylistItem(SQLModel, table=True):
+    """SQLModel representation of a playlist item."""
+
+    __tablename__ = "playlist_items"
+
+    id: str = Field(primary_key=True)
+    playlist_id: str = Field(index=True)
+    position: int | None = None
+    title: str | None = None
+    description: str | None = None
+    published_at: str | None = None
+    raw_json: str = Field(nullable=False)
+
+
+class Playlist(SQLModel, table=True):
+    """SQLModel representation of a playlist."""
+
+    __tablename__ = "playlists"
+
+    id: str = Field(primary_key=True)
+    title: str | None = None
+    description: str | None = None
+    raw_json: str = Field(nullable=False)
+    retrieved_at: str = Field(nullable=False)
+
+
+class Channel(SQLModel, table=True):
+    """SQLModel representation of a channel."""
+
+    __tablename__ = "channels"
+
+    id: str = Field(primary_key=True)
+    title: str | None = None
+    description: str | None = None
+    raw_json: str = Field(nullable=False)
+    retrieved_at: str = Field(nullable=False)
+
+
+class Video(SQLModel, table=True):
+    """SQLModel representation of a video."""
+
+    __tablename__ = "videos"
+
+    id: str = Field(primary_key=True)
+    title: str | None = None
+    description: str | None = None
+    raw_json: str = Field(nullable=False)
+    retrieved_at: str = Field(nullable=False)
+
+
+class ResourceLabel(SQLModel, table=True):
+    """SQLModel representation of a resource label."""
+
+    __tablename__ = "resource_labels"
+    __table_args__ = (
+        CheckConstraint(
+            "label IN ('whitelisted', 'blacklisted')",
+            name="ck_resource_labels_label",
+        ),
+    )
+
+    resource_type: str = Field(primary_key=True)
+    resource_id: str = Field(primary_key=True)
+    label: str = Field(nullable=False)
 
 
 def initialize_database() -> None:
     """Ensure the playlist, playlist item, channel, and resource tables exist."""
 
-    with _get_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS playlist_items (
-                id TEXT PRIMARY KEY,
-                playlist_id TEXT NOT NULL,
-                position INTEGER,
-                title TEXT,
-                description TEXT,
-                published_at TEXT,
-                raw_json TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id
-            ON playlist_items(playlist_id)
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS playlists (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                description TEXT,
-                raw_json TEXT NOT NULL,
-                retrieved_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS resource_labels (
-                resource_type TEXT NOT NULL,
-                resource_id TEXT NOT NULL,
-                label TEXT NOT NULL CHECK(label IN ('whitelisted', 'blacklisted')),
-                PRIMARY KEY (resource_type, resource_id)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS channels (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                description TEXT,
-                raw_json TEXT NOT NULL,
-                retrieved_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS videos (
-                id TEXT PRIMARY KEY,
-                title TEXT,
-                description TEXT,
-                raw_json TEXT NOT NULL,
-                retrieved_at TEXT NOT NULL
-            )
-            """
-        )
+    engine = _get_engine()
+    SQLModel.metadata.create_all(engine)
 
 
 def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
     """Replace stored playlist items with the provided dataset."""
 
-    records = []
+    records: list[PlaylistItem] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -103,53 +120,39 @@ def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
         description = snippet.get("description")
         published_at = snippet.get("publishedAt")
         records.append(
-            (
-                item_id,
-                snippet_playlist_id,
-                position,
-                title,
-                description,
-                published_at,
-                json.dumps(item, separators=(",", ":")),
+            PlaylistItem(
+                id=item_id,
+                playlist_id=snippet_playlist_id,
+                position=position,
+                title=title,
+                description=description,
+                published_at=published_at,
+                raw_json=json.dumps(item, separators=(",", ":")),
             )
         )
 
-    with _get_connection() as connection:
-        connection.execute(
-            "DELETE FROM playlist_items WHERE playlist_id = ?", (playlist_id,)
+    engine = _get_engine()
+    with Session(engine) as session:
+        session.exec(
+            delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist_id)
         )
         if records:
-            connection.executemany(
-                """
-                INSERT OR REPLACE INTO playlist_items (
-                    id,
-                    playlist_id,
-                    position,
-                    title,
-                    description,
-                    published_at,
-                    raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                records,
-            )
+            session.add_all(records)
+        session.commit()
 
 
 def fetch_playlist_items(playlist_id: str) -> list[dict]:
     """Return stored playlist items for the given playlist."""
 
-    with _get_connection() as connection:
-        cursor = connection.execute(
-            """
-            SELECT raw_json
-            FROM playlist_items
-            WHERE playlist_id = ?
-            ORDER BY position, title, id
-            """,
-            (playlist_id,),
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(PlaylistItem)
+            .where(PlaylistItem.playlist_id == playlist_id)
+            .order_by(PlaylistItem.position, PlaylistItem.title, PlaylistItem.id)
         )
-        rows = cursor.fetchall()
-    return [json.loads(row["raw_json"]) for row in rows]
+        rows = session.exec(statement).all()
+    return [json.loads(row.raw_json) for row in rows]
 
 
 def save_playlist(playlist: dict, *, retrieved_at: datetime) -> None:
@@ -163,61 +166,51 @@ def save_playlist(playlist: dict, *, retrieved_at: datetime) -> None:
     title = snippet.get("title")
     description = snippet.get("description")
     raw_json = json.dumps(playlist, separators=(",", ":"))
-    with _get_connection() as connection:
-        connection.execute(
-            """
-            INSERT INTO playlists (
-                id,
-                title,
-                description,
-                raw_json,
-                retrieved_at
-            ) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title=excluded.title,
-                description=excluded.description,
-                raw_json=excluded.raw_json,
-                retrieved_at=excluded.retrieved_at
-            """,
-            (
-                playlist_id,
-                title,
-                description,
-                raw_json,
-                retrieved_at.isoformat(),
-            ),
-        )
+    engine = _get_engine()
+    with Session(engine) as session:
+        existing = session.get(Playlist, playlist_id)
+        if existing:
+            existing.title = title
+            existing.description = description
+            existing.raw_json = raw_json
+            existing.retrieved_at = retrieved_at.isoformat()
+        else:
+            session.add(
+                Playlist(
+                    id=playlist_id,
+                    title=title,
+                    description=description,
+                    raw_json=raw_json,
+                    retrieved_at=retrieved_at.isoformat(),
+                )
+            )
+        session.commit()
 
 
-def fetch_playlist(playlist_id: str) -> Optional[dict]:
+def fetch_playlist(playlist_id: str) -> dict | None:
     """Fetch a stored YouTube playlist record."""
 
-    with _get_connection() as connection:
-        cursor = connection.execute(
-            """
-            SELECT id, title, description, raw_json, retrieved_at
-            FROM playlists
-            WHERE id = ?
-            """,
-            (playlist_id,),
-        )
-        row = cursor.fetchone()
+    engine = _get_engine()
+    with Session(engine) as session:
+        record = session.get(Playlist, playlist_id)
         label = (
-            fetch_resource_label("playlist", playlist_id, connection=connection)
-            if row
+            fetch_resource_label("playlist", playlist_id, session=session)
+            if record
             else None
         )
-    if not row:
+    if not record:
         return None
     return {
-        "id": row["id"],
-        "title": row["title"],
-        "description": row["description"],
-        "raw_json": json.loads(row["raw_json"]),
-        "retrieved_at": row["retrieved_at"],
+        "id": record.id,
+        "title": record.title,
+        "description": record.description,
+        "raw_json": json.loads(record.raw_json),
+        "retrieved_at": record.retrieved_at,
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
     }
+
+
 def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
     """Insert or update a YouTube channel record."""
 
@@ -229,30 +222,25 @@ def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
     title = snippet.get("title")
     description = snippet.get("description")
     raw_json = json.dumps(channel, separators=(",", ":"))
-    with _get_connection() as connection:
-        connection.execute(
-            """
-            INSERT INTO channels (
-                id,
-                title,
-                description,
-                raw_json,
-                retrieved_at
-            ) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title=excluded.title,
-                description=excluded.description,
-                raw_json=excluded.raw_json,
-                retrieved_at=excluded.retrieved_at
-            """,
-            (
-                channel_id,
-                title,
-                description,
-                raw_json,
-                retrieved_at.isoformat(),
-            ),
-        )
+    engine = _get_engine()
+    with Session(engine) as session:
+        existing = session.get(Channel, channel_id)
+        if existing:
+            existing.title = title
+            existing.description = description
+            existing.raw_json = raw_json
+            existing.retrieved_at = retrieved_at.isoformat()
+        else:
+            session.add(
+                Channel(
+                    id=channel_id,
+                    title=title,
+                    description=description,
+                    raw_json=raw_json,
+                    retrieved_at=retrieved_at.isoformat(),
+                )
+            )
+        session.commit()
 
 
 def save_video(video: dict, *, retrieved_at: datetime) -> None:
@@ -266,165 +254,159 @@ def save_video(video: dict, *, retrieved_at: datetime) -> None:
     title = snippet.get("title")
     description = snippet.get("description")
     raw_json = json.dumps(video, separators=(",", ":"))
-    with _get_connection() as connection:
-        connection.execute(
-            """
-            INSERT INTO videos (
-                id,
-                title,
-                description,
-                raw_json,
-                retrieved_at
-            ) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title=excluded.title,
-                description=excluded.description,
-                raw_json=excluded.raw_json,
-                retrieved_at=excluded.retrieved_at
-            """,
-            (
-                video_id,
-                title,
-                description,
-                raw_json,
-                retrieved_at.isoformat(),
-            ),
-        )
+    engine = _get_engine()
+    with Session(engine) as session:
+        existing = session.get(Video, video_id)
+        if existing:
+            existing.title = title
+            existing.description = description
+            existing.raw_json = raw_json
+            existing.retrieved_at = retrieved_at.isoformat()
+        else:
+            session.add(
+                Video(
+                    id=video_id,
+                    title=title,
+                    description=description,
+                    raw_json=raw_json,
+                    retrieved_at=retrieved_at.isoformat(),
+                )
+            )
+        session.commit()
 
 
-def fetch_channel(channel_id: str) -> Optional[dict]:
+def fetch_channel(channel_id: str) -> dict | None:
     """Fetch a stored YouTube channel record."""
 
-    with _get_connection() as connection:
-        cursor = connection.execute(
-            """
-            SELECT id, title, description, raw_json, retrieved_at
-            FROM channels
-            WHERE id = ?
-            """,
-            (channel_id,),
-        )
-        row = cursor.fetchone()
+    engine = _get_engine()
+    with Session(engine) as session:
+        record = session.get(Channel, channel_id)
         label = (
-            fetch_resource_label("channel", channel_id, connection=connection)
-            if row
+            fetch_resource_label("channel", channel_id, session=session)
+            if record
             else None
         )
-    if not row:
+    if not record:
         return None
     return {
-        "id": row["id"],
-        "title": row["title"],
-        "description": row["description"],
-        "raw_json": json.loads(row["raw_json"]),
-        "retrieved_at": row["retrieved_at"],
+        "id": record.id,
+        "title": record.title,
+        "description": record.description,
+        "raw_json": json.loads(record.raw_json),
+        "retrieved_at": record.retrieved_at,
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
     }
 
 
-def fetch_video(video_id: str) -> Optional[dict]:
+def fetch_video(video_id: str) -> dict | None:
     """Fetch a stored YouTube video record."""
 
-    with _get_connection() as connection:
-        cursor = connection.execute(
-            """
-            SELECT id, title, description, raw_json, retrieved_at
-            FROM videos
-            WHERE id = ?
-            """,
-            (video_id,),
-        )
-        row = cursor.fetchone()
+    engine = _get_engine()
+    with Session(engine) as session:
+        record = session.get(Video, video_id)
         label = (
-            fetch_resource_label("video", video_id, connection=connection)
-            if row
+            fetch_resource_label("video", video_id, session=session)
+            if record
             else None
         )
-    if not row:
+    if not record:
         return None
     return {
-        "id": row["id"],
-        "title": row["title"],
-        "description": row["description"],
-        "raw_json": json.loads(row["raw_json"]),
-        "retrieved_at": row["retrieved_at"],
+        "id": record.id,
+        "title": record.title,
+        "description": record.description,
+        "raw_json": json.loads(record.raw_json),
+        "retrieved_at": record.retrieved_at,
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
     }
 
 
 def set_resource_label(
-    resource_type: str, resource_id: str, label: str, *, connection: sqlite3.Connection | None = None
+    resource_type: str,
+    resource_id: str,
+    label: str,
+    *,
+    session: Session | None = None,
 ) -> None:
     """Persist a label for a resource."""
 
     if label not in {"whitelisted", "blacklisted"}:
         raise ValueError("Label must be 'whitelisted' or 'blacklisted'")
 
-    def _execute(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
-            INSERT INTO resource_labels (resource_type, resource_id, label)
-            VALUES (?, ?, ?)
-            ON CONFLICT(resource_type, resource_id) DO UPDATE SET
-                label=excluded.label
-            """,
-            (resource_type, resource_id, label),
-        )
+    def _persist(db_session: Session) -> None:
+        existing = db_session.get(ResourceLabel, (resource_type, resource_id))
+        if existing:
+            existing.label = label
+        else:
+            db_session.add(
+                ResourceLabel(
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    label=label,
+                )
+            )
 
-    if connection is not None:
-        _execute(connection)
+    if session is not None:
+        _persist(session)
         return
 
-    with _get_connection() as conn:
-        _execute(conn)
+    engine = _get_engine()
+    with Session(engine) as session_obj:
+        _persist(session_obj)
+        session_obj.commit()
 
 
 def fetch_resource_label(
-    resource_type: str, resource_id: str, *, connection: sqlite3.Connection | None = None
-) -> Optional[str]:
+    resource_type: str,
+    resource_id: str,
+    *,
+    session: Session | None = None,
+) -> str | None:
     """Retrieve the stored label for a resource, if any."""
 
-    def _query(conn: sqlite3.Connection) -> Optional[str]:
-        cursor = conn.execute(
-            """
-            SELECT label
-            FROM resource_labels
-            WHERE resource_type = ? AND resource_id = ?
-            """,
-            (resource_type, resource_id),
-        )
-        row = cursor.fetchone()
-        return row["label"] if row else None
+    def _query(db_session: Session) -> str | None:
+        record = db_session.get(ResourceLabel, (resource_type, resource_id))
+        return record.label if record else None
 
-    if connection is not None:
-        return _query(connection)
+    if session is not None:
+        return _query(session)
 
-    with _get_connection() as conn:
-        return _query(conn)
+    engine = _get_engine()
+    with Session(engine) as session_obj:
+        return _query(session_obj)
 
 
 def fetch_all_channels() -> list[dict]:
     """Return stored channel records including their labels."""
 
-    with _get_connection() as connection:
-        cursor = connection.execute(
-            """
-            SELECT c.id, c.title, c.retrieved_at, rl.label
-            FROM channels AS c
-            LEFT JOIN resource_labels AS rl
-                ON rl.resource_type = 'channel' AND rl.resource_id = c.id
-            ORDER BY (rl.label IS NULL), datetime(c.retrieved_at) DESC, c.id
-            """
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(Channel.id, Channel.title, Channel.retrieved_at, ResourceLabel.label)
+            .select_from(Channel)
+            .join(
+                ResourceLabel,
+                and_(
+                    ResourceLabel.resource_type == "channel",
+                    ResourceLabel.resource_id == Channel.id,
+                ),
+                isouter=True,
+            )
+            .order_by(
+                ResourceLabel.label.is_(None),
+                Channel.retrieved_at.desc(),
+                Channel.id,
+            )
         )
-        rows = cursor.fetchall()
+        rows = session.exec(statement).all()
     return [
         {
-            "id": row["id"],
-            "title": row["title"],
-            "retrieved_at": row["retrieved_at"],
-            "label": row["label"],
+            "id": row[0],
+            "title": row[1],
+            "retrieved_at": row[2],
+            "label": row[3],
         }
         for row in rows
     ]
@@ -433,23 +415,32 @@ def fetch_all_channels() -> list[dict]:
 def fetch_all_videos() -> list[dict]:
     """Return stored video records including their labels."""
 
-    with _get_connection() as connection:
-        cursor = connection.execute(
-            """
-            SELECT v.id, v.title, v.retrieved_at, rl.label
-            FROM videos AS v
-            LEFT JOIN resource_labels AS rl
-                ON rl.resource_type = 'video' AND rl.resource_id = v.id
-            ORDER BY (rl.label IS NULL), datetime(v.retrieved_at) DESC, v.id
-            """
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(Video.id, Video.title, Video.retrieved_at, ResourceLabel.label)
+            .select_from(Video)
+            .join(
+                ResourceLabel,
+                and_(
+                    ResourceLabel.resource_type == "video",
+                    ResourceLabel.resource_id == Video.id,
+                ),
+                isouter=True,
+            )
+            .order_by(
+                ResourceLabel.label.is_(None),
+                Video.retrieved_at.desc(),
+                Video.id,
+            )
         )
-        rows = cursor.fetchall()
+        rows = session.exec(statement).all()
     return [
         {
-            "id": row["id"],
-            "title": row["title"],
-            "retrieved_at": row["retrieved_at"],
-            "label": row["label"],
+            "id": row[0],
+            "title": row[1],
+            "retrieved_at": row[2],
+            "label": row[3],
         }
         for row in rows
     ]
