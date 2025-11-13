@@ -1033,7 +1033,11 @@ def create_app() -> FastAPI:
             )
             for playlist_id in playlist_ids:
                 items_to_save = playlist_items_map.get(playlist_id) or []
-                save_playlist_items(playlist_id, items_to_save)
+                save_playlist_items(
+                    playlist_id,
+                    items_to_save,
+                    retrieved_at=retrieved_at,
+                )
                 playlist_metadata = playlist_metadata_map.get(playlist_id)
                 if playlist_metadata:
                     save_playlist(playlist_metadata, retrieved_at=retrieved_at)
@@ -1065,8 +1069,12 @@ def create_app() -> FastAPI:
         )
 
         playlist_items = response_data.get("items", [])
+        retrieved_at = datetime.now(timezone.utc)
         await run_in_threadpool(
-            save_playlist_items, stripped_resource_id, playlist_items
+            save_playlist_items,
+            stripped_resource_id,
+            playlist_items,
+            retrieved_at=retrieved_at,
         )
 
         playlist_metadata_items = await fetch_youtube_playlists(
@@ -1076,8 +1084,6 @@ def create_app() -> FastAPI:
         label = LIST_TO_RESOURCE_LABEL.get(list_choice)
         if label is None:
             raise HTTPException(status_code=400, detail="Unknown list selection")
-
-        retrieved_at = datetime.now(timezone.utc)
 
         def _persist_playlist() -> None:
             if playlist_data:

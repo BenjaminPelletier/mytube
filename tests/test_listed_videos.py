@@ -19,7 +19,13 @@ def isolate_database(tmp_path, monkeypatch):
     db._engine = None
 
 
-def _make_playlist_item(video_id: str, item_id: str = "item") -> dict:
+def _make_playlist_item(
+    video_id: str,
+    item_id: str = "item",
+    *,
+    title: str | None = None,
+    description: str | None = "",
+) -> dict:
     return {
         "id": f"{item_id}-{video_id}",
         "snippet": {
@@ -28,8 +34,8 @@ def _make_playlist_item(video_id: str, item_id: str = "item") -> dict:
                 "videoId": video_id,
             },
             "playlistId": "UUuploads",
-            "title": f"Video {video_id}",
-            "description": "",
+            "title": title if title is not None else f"Video {video_id}",
+            "description": description,
             "position": 0,
         },
         "contentDetails": {"videoId": video_id},
@@ -44,7 +50,11 @@ def test_channel_label_populates_channel_identifier():
         "contentDetails": {"relatedPlaylists": {"uploads": "UUuploads"}},
     }
     db.save_channel(channel_payload, retrieved_at=retrieved_at)
-    db.save_playlist_items("UUuploads", [_make_playlist_item("video123")])
+    db.save_playlist_items(
+        "UUuploads",
+        [_make_playlist_item("video123")],
+        retrieved_at=retrieved_at,
+    )
     db.set_resource_label("channel", "UC123", "whitelisted")
 
     db.repopulate_listed_videos()
@@ -83,3 +93,59 @@ def test_listed_videos_content_uses_reference_links():
     assert "/configure/channels/UC123" in html
     assert "<p>👎" in html
     assert "/configure/playlists/PL456" in html
+
+
+def test_playlist_items_create_partial_video_entries():
+    retrieved_at = datetime.now(timezone.utc)
+    item = _make_playlist_item("video999", title="Stored Title", description="Partial")
+
+    db.save_playlist_items(
+        "UUuploads",
+        [item],
+        retrieved_at=retrieved_at,
+    )
+
+    video = db.fetch_video("video999")
+
+    assert video is not None
+    assert video["title"] == "Stored Title"
+    assert video["description"] == "Partial"
+    assert video["retrieved_at"] == retrieved_at.isoformat()
+    assert video["raw_json"] is None
+
+
+def test_playlist_items_do_not_overwrite_full_video_data():
+    initial_retrieved_at = datetime.now(timezone.utc)
+    db.save_playlist_items(
+        "UUuploads",
+        [_make_playlist_item("video321", title="Initial Title")],
+        retrieved_at=initial_retrieved_at,
+    )
+
+    full_video_retrieved_at = datetime.now(timezone.utc)
+    db.save_video(
+        {
+            "id": "video321",
+            "snippet": {
+                "title": "Full Title",
+                "description": "Full description",
+            },
+        },
+        retrieved_at=full_video_retrieved_at,
+    )
+
+    updated_item = _make_playlist_item("video321", title="Playlist Title", description="New")
+    later_retrieved_at = datetime.now(timezone.utc)
+    db.save_playlist_items(
+        "UUuploads",
+        [updated_item],
+        retrieved_at=later_retrieved_at,
+    )
+
+    video = db.fetch_video("video321")
+
+    assert video is not None
+    assert video["title"] == "Full Title"
+    assert video["description"] == "Full description"
+    assert video["retrieved_at"] == full_video_retrieved_at.isoformat()
+    assert video["raw_json"] is not None
