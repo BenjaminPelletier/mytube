@@ -1,0 +1,112 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  max-width: 60rem;
+  line-height: 1.5;
+  color: #1f1f1f;
+}
+
+h1 {
+  margin-bottom: 0.5rem;
+  font-size: clamp(1.75rem, 2vw + 1rem, 2.5rem);
+}
+
+.configure-menu {
+  display: flex;
+  gap: 1rem;
+  margin: 0 -0.5rem 1.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #d0d7de;
+  flex-wrap: wrap;
+}
+
+.configure-link {
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.5rem;
+  color: #24292f;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.configure-link:hover {
+  background: #f0f6ff;
+  color: #0969da;
+}
+
+.configure-link.active {
+  background: #0969da;
+  color: white;
+}
+
+.resource-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.resource-form label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.resource-form input[type="text"] {
+  flex: 1 1 18rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d0d7de;
+  font-size: 1rem;
+}
+
+.resource-form button {
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+  cursor: pointer;
+}
+
+.resource-form button:hover {
+  background: #e9eef5;
+}
+
+.configure-content section {
+  background: #f6f8fa;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+
+.configure-content section + section {
+  margin-top: 1rem;
+}
+
+.configure-content dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(9rem, 20%) 1fr;
+  gap: 0.5rem 1.5rem;
+}
+
+.configure-content dt {
+  font-weight: 600;
+  color: #57606a;
+}
+
+.configure-content dd {
+  margin: 0;
+}
