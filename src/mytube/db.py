@@ -19,7 +19,7 @@ def _get_connection() -> sqlite3.Connection:
 
 
 def initialize_database() -> None:
-    """Ensure the playlist items and channels tables exist."""
+    """Ensure the playlist items, channels, and resource label tables exist."""
 
     with _get_connection() as connection:
         connection.execute(
@@ -43,16 +43,81 @@ def initialize_database() -> None:
         )
         connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS resource_labels (
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                label TEXT NOT NULL CHECK(label IN ('whitelisted', 'blacklisted')),
+                PRIMARY KEY (resource_type, resource_id)
+            )
+            """
+        )
+
+        _ensure_channels_table(connection)
+
+
+def _ensure_channels_table(connection: sqlite3.Connection) -> None:
+    """Create or migrate the channels table to the latest schema."""
+
+    cursor = connection.execute("PRAGMA table_info(channels)")
+    rows = cursor.fetchall()
+    if not rows:
+        connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS channels (
                 id TEXT PRIMARY KEY,
                 title TEXT,
                 description TEXT,
                 raw_json TEXT NOT NULL,
-                retrieved_at TEXT NOT NULL,
-                whitelist INTEGER NOT NULL
+                retrieved_at TEXT NOT NULL
             )
             """
         )
+        return
+
+    column_names = {row["name"] for row in rows}
+    if "whitelist" not in column_names:
+        # The schema is already up to date.
+        return
+
+    connection.execute("ALTER TABLE channels RENAME TO channels_old")
+    connection.execute(
+        """
+        CREATE TABLE channels (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            description TEXT,
+            raw_json TEXT NOT NULL,
+            retrieved_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO channels (id, title, description, raw_json, retrieved_at)
+        SELECT id, title, description, raw_json, retrieved_at FROM channels_old
+        """
+    )
+    legacy_labels = connection.execute(
+        "SELECT id, whitelist FROM channels_old"
+    ).fetchall()
+    if legacy_labels:
+        connection.executemany(
+            """
+            INSERT INTO resource_labels (resource_type, resource_id, label)
+            VALUES (?, ?, ?)
+            ON CONFLICT(resource_type, resource_id) DO UPDATE SET
+                label=excluded.label
+            """,
+            [
+                (
+                    "channel",
+                    row["id"],
+                    "whitelisted" if row["whitelist"] else "blacklisted",
+                )
+                for row in legacy_labels
+            ],
+        )
+    connection.execute("DROP TABLE channels_old")
 
 
 def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
@@ -121,7 +186,7 @@ def fetch_playlist_items(playlist_id: str) -> list[dict]:
     return [json.loads(row["raw_json"]) for row in rows]
 
 
-def save_channel(channel: dict, *, retrieved_at: datetime, whitelist: bool) -> None:
+def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
     """Insert or update a YouTube channel record."""
 
     channel_id = channel.get("id")
@@ -140,15 +205,13 @@ def save_channel(channel: dict, *, retrieved_at: datetime, whitelist: bool) -> N
                 title,
                 description,
                 raw_json,
-                retrieved_at,
-                whitelist
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                retrieved_at
+            ) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title,
                 description=excluded.description,
                 raw_json=excluded.raw_json,
-                retrieved_at=excluded.retrieved_at,
-                whitelist=excluded.whitelist
+                retrieved_at=excluded.retrieved_at
             """,
             (
                 channel_id,
@@ -156,7 +219,6 @@ def save_channel(channel: dict, *, retrieved_at: datetime, whitelist: bool) -> N
                 description,
                 raw_json,
                 retrieved_at.isoformat(),
-                1 if whitelist else 0,
             ),
         )
 
@@ -167,13 +229,18 @@ def fetch_channel(channel_id: str) -> Optional[dict]:
     with _get_connection() as connection:
         cursor = connection.execute(
             """
-            SELECT id, title, description, raw_json, retrieved_at, whitelist
+            SELECT id, title, description, raw_json, retrieved_at
             FROM channels
             WHERE id = ?
             """,
             (channel_id,),
         )
         row = cursor.fetchone()
+        label = (
+            fetch_resource_label("channel", channel_id, connection=connection)
+            if row
+            else None
+        )
     if not row:
         return None
     return {
@@ -182,8 +249,60 @@ def fetch_channel(channel_id: str) -> Optional[dict]:
         "description": row["description"],
         "raw_json": json.loads(row["raw_json"]),
         "retrieved_at": row["retrieved_at"],
-        "whitelist": bool(row["whitelist"]),
+        "label": label,
+        "whitelist": label == "whitelisted" if label is not None else False,
     }
+
+
+def set_resource_label(
+    resource_type: str, resource_id: str, label: str, *, connection: sqlite3.Connection | None = None
+) -> None:
+    """Persist a label for a resource."""
+
+    if label not in {"whitelisted", "blacklisted"}:
+        raise ValueError("Label must be 'whitelisted' or 'blacklisted'")
+
+    def _execute(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            INSERT INTO resource_labels (resource_type, resource_id, label)
+            VALUES (?, ?, ?)
+            ON CONFLICT(resource_type, resource_id) DO UPDATE SET
+                label=excluded.label
+            """,
+            (resource_type, resource_id, label),
+        )
+
+    if connection is not None:
+        _execute(connection)
+        return
+
+    with _get_connection() as conn:
+        _execute(conn)
+
+
+def fetch_resource_label(
+    resource_type: str, resource_id: str, *, connection: sqlite3.Connection | None = None
+) -> Optional[str]:
+    """Retrieve the stored label for a resource, if any."""
+
+    def _query(conn: sqlite3.Connection) -> Optional[str]:
+        cursor = conn.execute(
+            """
+            SELECT label
+            FROM resource_labels
+            WHERE resource_type = ? AND resource_id = ?
+            """,
+            (resource_type, resource_id),
+        )
+        row = cursor.fetchone()
+        return row["label"] if row else None
+
+    if connection is not None:
+        return _query(connection)
+
+    with _get_connection() as conn:
+        return _query(conn)
 
 
 __all__ = [
@@ -192,5 +311,7 @@ __all__ = [
     "fetch_playlist_items",
     "save_channel",
     "fetch_channel",
+    "set_resource_label",
+    "fetch_resource_label",
 ]
 

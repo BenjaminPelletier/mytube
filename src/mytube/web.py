@@ -27,6 +27,7 @@ from .db import (
     initialize_database,
     save_channel,
     save_playlist_items,
+    set_resource_label,
 )
 from .youtube import fetch_youtube_section_data, load_youtube_api_key
 
@@ -46,6 +47,7 @@ CONFIG_NAVIGATION = (
 CONFIG_LABELS = {slug: label for slug, label in CONFIG_NAVIGATION}
 
 LIST_LABELS = {"white": "Whitelist", "black": "Blacklist"}
+LIST_TO_RESOURCE_LABEL = {"white": "whitelisted", "black": "blacklisted"}
 
 HARD_CODED_RESOURCES = {
     "channels": {
@@ -209,8 +211,13 @@ def _channel_resource_content(channel: dict | None) -> str:
     title = html.escape(channel.get("title") or "Untitled channel")
     description = html.escape(channel.get("description") or "")
     retrieved_at = html.escape(channel.get("retrieved_at") or "Unknown")
-    whitelist = channel.get("whitelist", False)
-    vote = "👍" if whitelist else "👎"
+    label = channel.get("label")
+    if label == "whitelisted":
+        vote = "👍"
+    elif label == "blacklisted":
+        vote = "👎"
+    else:
+        vote = ""
 
     description_html = (
         f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
@@ -377,13 +384,15 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=404, detail="Channel not found")
             channel_data = items[0]
             channel_id = channel_data.get("id") or stripped_resource_id
-            await run_in_threadpool(
-                lambda: save_channel(
-                    channel_data,
-                    retrieved_at=datetime.now(timezone.utc),
-                    whitelist=list_choice == "white",
-                )
-            )
+            label = LIST_TO_RESOURCE_LABEL.get(list_choice)
+            if label is None:
+                raise HTTPException(status_code=400, detail="Unknown list selection")
+
+            def _persist_channel() -> None:
+                save_channel(channel_data, retrieved_at=datetime.now(timezone.utc))
+                set_resource_label("channel", channel_id, label)
+
+            await run_in_threadpool(_persist_channel)
             redirect_url = app.url_path_for(
                 "view_resource",
                 section=normalized_section,
