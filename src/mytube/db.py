@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -132,10 +132,13 @@ def initialize_database() -> None:
     SQLModel.metadata.create_all(engine)
 
 
-def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
+def save_playlist_items(
+    playlist_id: str, items: Iterable[dict], *, retrieved_at: datetime | None = None
+) -> None:
     """Replace stored playlist items with the provided dataset."""
 
     records: list[PlaylistItem] = []
+    video_snippets: dict[str, tuple[str | None, str | None]] = {}
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -148,6 +151,7 @@ def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
         title = snippet.get("title")
         description = snippet.get("description")
         published_at = snippet.get("publishedAt")
+        raw_json = json.dumps(item, separators=(",", ":"))
         records.append(
             PlaylistItem(
                 id=item_id,
@@ -156,17 +160,42 @@ def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
                 title=title,
                 description=description,
                 published_at=published_at,
-                raw_json=json.dumps(item, separators=(",", ":")),
+                raw_json=raw_json,
             )
         )
+        video_id = _extract_video_id_from_playlist_item(raw_json)
+        if video_id:
+            video_snippets[video_id] = (title, description)
 
     engine = _get_engine()
+    retrieved_value = (retrieved_at or datetime.now(timezone.utc)).isoformat()
     with Session(engine) as session:
         session.exec(
             delete(PlaylistItem).where(PlaylistItem.playlist_id == playlist_id)
         )
         if records:
             session.add_all(records)
+        if video_snippets:
+            for video_id, (video_title, video_description) in video_snippets.items():
+                existing_video = session.get(Video, video_id)
+                if existing_video:
+                    if existing_video.raw_json:
+                        continue
+                    existing_video.title = video_title
+                    existing_video.description = video_description
+                    existing_video.retrieved_at = retrieved_value
+                    if not existing_video.raw_json:
+                        existing_video.raw_json = ""
+                else:
+                    session.add(
+                        Video(
+                            id=video_id,
+                            title=video_title,
+                            description=video_description,
+                            raw_json="",
+                            retrieved_at=retrieved_value,
+                        )
+                    )
         session.commit()
 
 
@@ -470,11 +499,17 @@ def fetch_video(video_id: str) -> dict | None:
         )
     if not record:
         return None
+    raw_payload: Any | None = None
+    if record.raw_json:
+        try:
+            raw_payload = json.loads(record.raw_json)
+        except json.JSONDecodeError:
+            raw_payload = None
     return {
         "id": record.id,
         "title": record.title,
         "description": record.description,
-        "raw_json": json.loads(record.raw_json),
+        "raw_json": raw_payload,
         "retrieved_at": record.retrieved_at,
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
