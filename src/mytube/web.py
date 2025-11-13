@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -824,7 +824,7 @@ def create_app() -> FastAPI:
         request: Request,
         section: str,
         resource_id: str,
-        list: str | None = None,
+        list_choice: str | None = Query(None, alias="list"),
     ) -> HTMLResponse:
         normalized_section = _validate_section(section)
         if normalized_section == "playlists":
@@ -833,7 +833,7 @@ def create_app() -> FastAPI:
             )
             playlist = await run_in_threadpool(fetch_playlist, resource_id)
             content = _playlist_resource_content(
-                resource_id, playlist_items, list, playlist
+                resource_id, playlist_items, list_choice, playlist
             )
         elif normalized_section == "channels":
             channel = await run_in_threadpool(fetch_channel, resource_id)
