@@ -494,9 +494,9 @@ def _channel_resource_content(
         ""
         if not encoded_channel_id
         else (
-            "<a class=\"resource-info-link\" "
+            " <a class=\"resource-info-link\" "
             "href=\"/configure/channels/"
-            f"{encoded_channel_id}\" "
+            f"{encoded_channel_id}/raw\" "
             "title=\"View raw YouTube data\" "
             "aria-label=\"View raw YouTube data\">🛈</a>"
         )
@@ -549,9 +549,9 @@ def _playlist_resource_content(
             ""
             if not encoded_playlist_id
             else (
-                "<a class=\"resource-info-link\" "
+                " <a class=\"resource-info-link\" "
                 "href=\"/configure/playlists/"
-                f"{encoded_playlist_id}\" "
+                f"{encoded_playlist_id}/raw\" "
                 "title=\"View raw YouTube data\" "
                 "aria-label=\"View raw YouTube data\">🛈</a>"
             )
@@ -648,9 +648,9 @@ def _video_resource_content(video: dict | None) -> str:
         ""
         if not encoded_video_id
         else (
-            "<a class=\"resource-info-link\" "
+            " <a class=\"resource-info-link\" "
             "href=\"/configure/videos/"
-            f"{encoded_video_id}\" "
+            f"{encoded_video_id}/raw\" "
             "title=\"View raw YouTube data\" "
             "aria-label=\"View raw YouTube data\">🛈</a>"
         )
@@ -690,7 +690,19 @@ def _api_response_content(
         f"<h2>YouTube API response for <code>{escaped_id}</code></h2>"
         f"{list_summary}"
         f"<p><strong>Endpoint:</strong> {html.escape(request_url)}</p>"
-        f"<pre class=\"api-response\">{json_payload}</pre>"
+        f"<pre class=\"api-response\"><code>{json_payload}</code></pre>"
+        "</section>"
+    )
+
+
+def _raw_payload_content(resource_label: str, resource_id: str, payload: Any) -> str:
+    escaped_id = html.escape(resource_id)
+    formatted_json = html.escape(json.dumps(payload, indent=2, sort_keys=True))
+    return (
+        "<section>"
+        f"<h2>{resource_label} API response</h2>"
+        f"<p><small>ID: {escaped_id}</small></p>"
+        f"<pre class=\"raw-json\"><code>{formatted_json}</code></pre>"
         "</section>"
     )
 
@@ -1038,9 +1050,10 @@ def create_app() -> FastAPI:
 
     @app.get(
         "/configure/channels/{resource_id}/raw",
+        response_class=HTMLResponse,
         name="view_channel_raw",
     )
-    async def view_channel_raw(resource_id: str) -> Response:
+    async def view_channel_raw(request: Request, resource_id: str) -> HTMLResponse:
         channel = await run_in_threadpool(fetch_channel, resource_id)
         if not channel:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -1049,16 +1062,22 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Channel raw data is unavailable"
             )
-        return Response(
-            json.dumps(raw_payload, indent=2, sort_keys=True),
-            media_type="application/json",
+        content = _raw_payload_content("Channel", resource_id, raw_payload)
+        return _render_config_page(
+            request,
+            app,
+            heading="Channel raw data",
+            active_section="channels",
+            content=content,
+            show_resource_form=False,
         )
 
     @app.get(
         "/configure/playlists/{resource_id}/raw",
+        response_class=HTMLResponse,
         name="view_playlist_raw",
     )
-    async def view_playlist_raw(resource_id: str) -> Response:
+    async def view_playlist_raw(request: Request, resource_id: str) -> HTMLResponse:
         playlist = await run_in_threadpool(fetch_playlist, resource_id)
         if not playlist:
             raise HTTPException(status_code=404, detail="Playlist not found")
@@ -1067,16 +1086,22 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Playlist raw data is unavailable"
             )
-        return Response(
-            json.dumps(raw_payload, indent=2, sort_keys=True),
-            media_type="application/json",
+        content = _raw_payload_content("Playlist", resource_id, raw_payload)
+        return _render_config_page(
+            request,
+            app,
+            heading="Playlist raw data",
+            active_section="playlists",
+            content=content,
+            show_resource_form=False,
         )
 
     @app.get(
         "/configure/videos/{resource_id}/raw",
+        response_class=HTMLResponse,
         name="view_video_raw",
     )
-    async def view_video_raw(resource_id: str) -> Response:
+    async def view_video_raw(request: Request, resource_id: str) -> HTMLResponse:
         video = await run_in_threadpool(fetch_video, resource_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
@@ -1085,9 +1110,14 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Video raw data is unavailable"
             )
-        return Response(
-            json.dumps(raw_payload, indent=2, sort_keys=True),
-            media_type="application/json",
+        content = _raw_payload_content("Video", resource_id, raw_payload)
+        return _render_config_page(
+            request,
+            app,
+            heading="Video raw data",
+            active_section="videos",
+            content=content,
+            show_resource_form=False,
         )
 
     @app.get(
