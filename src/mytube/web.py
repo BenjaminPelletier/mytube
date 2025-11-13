@@ -64,31 +64,16 @@ CONFIG_LABELS = {slug: label for slug, label in CONFIG_NAVIGATION}
 LIST_LABELS = {"white": "Whitelist", "black": "Blacklist"}
 LIST_TO_RESOURCE_LABEL = {"white": "whitelisted", "black": "blacklisted"}
 
-HARD_CODED_RESOURCES = {
-    "channels": {
-        "UC_x5XG1OV2P6uZZ5FSM9Ttw": {
-            "title": "Google Developers",
-            "description": "The Google Developers channel, packed with product news and videos.",
-            "subscribers": "2.6M subscribers",
-        },
-        "UCVHFbqXqoYvEWM1Ddxl0QDg": {
-            "title": "Python",
-            "description": "Official Python Software Foundation updates and tutorials.",
-            "subscribers": "600K subscribers",
-        },
-    },
-    "playlists": {
-        "PL590L5WQmH8fJ54FqA0bG8TPEj-UZ_J1b": {
-            "title": "YouTube Developers Live",
-            "description": "Sessions exploring the YouTube API and developer tooling.",
-            "items": "25 videos",
-        },
-        "PLAwxTw4SYaPnMwH8bJ5rE2l78G_uuNzhf": {
-            "title": "FastAPI Tutorials",
-            "description": "A curated list of introductory FastAPI tutorials.",
-            "items": "12 videos",
-        },
-    },
+CONFIG_ROUTE_NAMES = {
+    "channels": "configure_channels",
+    "playlists": "configure_playlists",
+    "videos": "configure_videos",
+}
+
+CREATE_ROUTE_NAMES = {
+    "channels": "create_channels",
+    "playlists": "create_playlists",
+    "videos": "create_videos",
 }
 
 
@@ -102,9 +87,10 @@ def _validate_section(section: str) -> str:
 def _navigation_links(app: FastAPI, active_section: str | None) -> list[dict[str, str | bool]]:
     links: list[dict[str, str | bool]] = []
     for slug, label in CONFIG_NAVIGATION:
+        route_name = CONFIG_ROUTE_NAMES[slug]
         links.append(
             {
-                "url": app.url_path_for("configure_section", section=slug),
+                "url": app.url_path_for(route_name),
                 "label": label,
                 "active": active_section == slug,
             }
@@ -123,9 +109,9 @@ def _render_config_page(
     resource_value: str = "",
 ) -> HTMLResponse:
     navigation = _navigation_links(app, active_section)
-    action = form_action or app.url_path_for(
-        "create_resource", section=active_section or CONFIG_NAVIGATION[0][0]
-    )
+    default_section = active_section or CONFIG_NAVIGATION[0][0]
+    default_route = CREATE_ROUTE_NAMES[default_section]
+    action = form_action or app.url_path_for(default_route)
     return templates.TemplateResponse(
         "configure.html",
         {
@@ -137,30 +123,6 @@ def _render_config_page(
             "content_html": content,
         },
     )
-
-
-def _section_overview_content(section: str) -> str:
-    resources = HARD_CODED_RESOURCES.get(section, {})
-    if not resources:
-        return "<section><p>No example resources available.</p></section>"
-    items = []
-    for resource_id, details in resources.items():
-        escaped_id = html.escape(resource_id)
-        title = html.escape(details.get("title", "Unnamed"))
-        list_items = [f"<dt>ID</dt><dd>{escaped_id}</dd>"]
-        for key, value in details.items():
-            escaped_key = html.escape(key.replace("_", " ").title())
-            escaped_value = html.escape(value)
-            list_items.append(f"<dt>{escaped_key}</dt><dd>{escaped_value}</dd>")
-        detail_list = "".join(list_items)
-        items.append(
-            "<section>"
-            f"<h2>{title}</h2>"
-            f"<p>Preview of stored metadata for <code>{escaped_id}</code>.</p>"
-            f"<dl>{detail_list}</dl>"
-            "</section>"
-        )
-    return "".join(items)
 
 
 def _resource_vote(label: str | None) -> str:
@@ -305,43 +267,6 @@ def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
         "<ol>"
         f"{items_html}"
         "</ol>"
-        "</section>"
-    )
-
-
-def _resource_detail_content(section: str, resource_id: str, list_choice: str | None) -> str:
-    resources = HARD_CODED_RESOURCES.get(section, {})
-    resource = resources.get(resource_id)
-    escaped_id = html.escape(resource_id)
-    label = CONFIG_LABELS.get(section, section.title())
-    list_summary = (
-        f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
-        if list_choice in LIST_LABELS
-        else ""
-    )
-    if not resource:
-        return (
-            "<section>"
-            f"<h2>New {html.escape(label)} Resource</h2>"
-            f"<p>No stored metadata for <code>{escaped_id}</code> yet."
-            f"{list_summary}"
-            "<p>This demo view uses hard-coded data. Persisted storage will be added later.</p>"
-            "</section>"
-        )
-
-    details = [f"<dt>ID</dt><dd>{escaped_id}</dd>"]
-    for key, value in resource.items():
-        details.append(
-            f"<dt>{html.escape(key.replace('_', ' ').title())}</dt><dd>{html.escape(value)}</dd>"
-        )
-    detail_list = "".join(details)
-    title = html.escape(resource.get("title", f"{label} Resource"))
-    return (
-        "<section>"
-        f"<h2>{title}</h2>"
-        f"<p>Preview data for <code>{escaped_id}</code> in the configuration workspace.</p>"
-        f"{list_summary}"
-        f"<dl>{detail_list}</dl>"
         "</section>"
     )
 
@@ -551,39 +476,14 @@ def create_app() -> FastAPI:
             heading="Configure MyTube",
             active_section=None,
             content=content,
-            form_action=app.url_path_for("create_resource", section="channels"),
+            form_action=app.url_path_for(CREATE_ROUTE_NAMES["channels"]),
         )
 
-    @app.get("/configure/{section}", response_class=HTMLResponse, name="configure_section")
-    async def configure_section(request: Request, section: str) -> HTMLResponse:
-        normalized_section = _validate_section(section)
-        if normalized_section == "channels":
-            channels = await run_in_threadpool(fetch_all_channels)
-            content = _channels_overview_content(channels)
-        elif normalized_section == "playlists":
-            playlists = await run_in_threadpool(fetch_all_playlists)
-            content = _playlists_overview_content(playlists)
-        elif normalized_section == "videos":
-            videos = await run_in_threadpool(fetch_all_videos)
-            content = _videos_overview_content(videos)
-        else:
-            content = _section_overview_content(normalized_section)
-        heading = f"Manage {CONFIG_LABELS[normalized_section]}"
-        return _render_config_page(
-            request,
-            app,
-            heading=heading,
-            active_section=normalized_section,
-            content=content,
-            form_action=app.url_path_for("create_resource", section=normalized_section),
-        )
-
-    @app.post("/configure/{section}", name="create_resource")
-    async def create_resource(
+    async def _create_resource(
         request: Request,
         section: str,
-        resource_id: str = Form(..., alias="resource_id"),
-        list_choice: str = Form(..., alias="list"),
+        resource_id: str,
+        list_choice: str,
     ) -> Response:
         normalized_section = _validate_section(section)
         stripped_resource_id = resource_id.strip()
@@ -687,9 +587,87 @@ def create_app() -> FastAPI:
             heading=heading,
             active_section=normalized_section,
             content=content,
-            form_action=app.url_path_for("create_resource", section=normalized_section),
+            form_action=app.url_path_for(CREATE_ROUTE_NAMES[normalized_section]),
             resource_value=stripped_resource_id,
         )
+
+    @app.get(
+        "/configure/channels",
+        response_class=HTMLResponse,
+        name="configure_channels",
+    )
+    async def configure_channels(request: Request) -> HTMLResponse:
+        channels = await run_in_threadpool(fetch_all_channels)
+        content = _channels_overview_content(channels)
+        heading = f"Manage {CONFIG_LABELS['channels']}"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section="channels",
+            content=content,
+            form_action=app.url_path_for(CREATE_ROUTE_NAMES["channels"]),
+        )
+
+    @app.get(
+        "/configure/playlists",
+        response_class=HTMLResponse,
+        name="configure_playlists",
+    )
+    async def configure_playlists(request: Request) -> HTMLResponse:
+        playlists = await run_in_threadpool(fetch_all_playlists)
+        content = _playlists_overview_content(playlists)
+        heading = f"Manage {CONFIG_LABELS['playlists']}"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section="playlists",
+            content=content,
+            form_action=app.url_path_for(CREATE_ROUTE_NAMES["playlists"]),
+        )
+
+    @app.get(
+        "/configure/videos",
+        response_class=HTMLResponse,
+        name="configure_videos",
+    )
+    async def configure_videos(request: Request) -> HTMLResponse:
+        videos = await run_in_threadpool(fetch_all_videos)
+        content = _videos_overview_content(videos)
+        heading = f"Manage {CONFIG_LABELS['videos']}"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section="videos",
+            content=content,
+            form_action=app.url_path_for(CREATE_ROUTE_NAMES["videos"]),
+        )
+
+    @app.post("/configure/channels", name="create_channels")
+    async def create_channels(
+        request: Request,
+        resource_id: str = Form(..., alias="resource_id"),
+        list_choice: str = Form(..., alias="list"),
+    ) -> Response:
+        return await _create_resource(request, "channels", resource_id, list_choice)
+
+    @app.post("/configure/playlists", name="create_playlists")
+    async def create_playlists(
+        request: Request,
+        resource_id: str = Form(..., alias="resource_id"),
+        list_choice: str = Form(..., alias="list"),
+    ) -> Response:
+        return await _create_resource(request, "playlists", resource_id, list_choice)
+
+    @app.post("/configure/videos", name="create_videos")
+    async def create_videos(
+        request: Request,
+        resource_id: str = Form(..., alias="resource_id"),
+        list_choice: str = Form(..., alias="list"),
+    ) -> Response:
+        return await _create_resource(request, "videos", resource_id, list_choice)
 
     @app.get(
         "/configure/{section}/{resource_id}",
@@ -720,8 +698,8 @@ def create_app() -> FastAPI:
         elif normalized_section == "videos":
             video = await run_in_threadpool(fetch_video, resource_id)
             content = _video_resource_content(video)
-        else:
-            content = _resource_detail_content(normalized_section, resource_id, list)
+        else:  # pragma: no cover - defensive
+            raise HTTPException(status_code=500, detail="Unsupported configuration section")
         heading = f"{CONFIG_LABELS[normalized_section]} Resource"
         return _render_config_page(
             request,
@@ -729,7 +707,7 @@ def create_app() -> FastAPI:
             heading=heading,
             active_section=normalized_section,
             content=content,
-            form_action=app.url_path_for("create_resource", section=normalized_section),
+            form_action=app.url_path_for(CREATE_ROUTE_NAMES[normalized_section]),
             resource_value=resource_id,
         )
 
