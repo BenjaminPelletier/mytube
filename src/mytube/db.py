@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
-from sqlalchemy import CheckConstraint, and_, delete
+from sqlalchemy import CheckConstraint, Column, Text, and_, delete
 from sqlalchemy.engine import Engine
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
@@ -66,6 +66,7 @@ class Channel(SQLModel, table=True):
     description: str | None = None
     raw_json: str = Field(nullable=False)
     retrieved_at: str = Field(nullable=False)
+    uploads_playlist: str | None = Field(default=None, index=True)
 
 
 class ChannelSection(SQLModel, table=True):
@@ -106,6 +107,22 @@ class ResourceLabel(SQLModel, table=True):
     resource_type: str = Field(primary_key=True)
     resource_id: str = Field(primary_key=True)
     label: str = Field(nullable=False)
+
+
+class ListedVideo(SQLModel, table=True):
+    """SQLModel representation of a whitelisted/blacklisted video."""
+
+    __tablename__ = "listed_videos"
+
+    video_id: str = Field(primary_key=True)
+    whitelisted_by: str | None = Field(
+        default=None,
+        sa_column=Column("whitelisted_by", Text, nullable=True),
+    )
+    blacklisted_by: str | None = Field(
+        default=None,
+        sa_column=Column("blacklisted_by", Text, nullable=True),
+    )
 
 
 def initialize_database() -> None:
@@ -291,6 +308,14 @@ def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
     title = snippet.get("title")
     description = snippet.get("description")
     raw_json = json.dumps(channel, separators=(",", ":"))
+    uploads_playlist: str | None = None
+    content_details = channel.get("contentDetails")
+    if isinstance(content_details, dict):
+        related_playlists = content_details.get("relatedPlaylists")
+        if isinstance(related_playlists, dict):
+            uploads_value = related_playlists.get("uploads")
+            if isinstance(uploads_value, str) and uploads_value:
+                uploads_playlist = uploads_value
     engine = _get_engine()
     with Session(engine) as session:
         existing = session.get(Channel, channel_id)
@@ -299,6 +324,7 @@ def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
             existing.description = description
             existing.raw_json = raw_json
             existing.retrieved_at = retrieved_at.isoformat()
+            existing.uploads_playlist = uploads_playlist
         else:
             session.add(
                 Channel(
@@ -307,6 +333,7 @@ def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
                     description=description,
                     raw_json=raw_json,
                     retrieved_at=retrieved_at.isoformat(),
+                    uploads_playlist=uploads_playlist,
                 )
             )
         session.commit()
@@ -403,6 +430,7 @@ def fetch_channel(channel_id: str) -> dict | None:
         "retrieved_at": record.retrieved_at,
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
+        "uploads_playlist": record.uploads_playlist,
     }
 
 
@@ -514,7 +542,12 @@ def fetch_all_channels() -> list[dict]:
     engine = _get_engine()
     with Session(engine) as session:
         statement = (
-            select(Channel.id, Channel.title, Channel.retrieved_at, ResourceLabel.label)
+            select(
+                Channel.id,
+                Channel.title,
+                Channel.retrieved_at,
+                ResourceLabel.label,
+            )
             .select_from(Channel)
             .join(
                 ResourceLabel,
@@ -540,6 +573,194 @@ def fetch_all_channels() -> list[dict]:
         }
         for row in rows
     ]
+
+
+def _load_identifier_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, str) and item]
+
+
+def _dump_identifier_list(values: Iterable[str]) -> str | None:
+    unique_values = sorted({value for value in values if isinstance(value, str) and value})
+    if not unique_values:
+        return None
+    return json.dumps(unique_values, separators=(",", ":"))
+
+
+def _extract_video_id_from_playlist_item(raw_json: str) -> str | None:
+    try:
+        payload: Any = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    snippet = payload.get("snippet")
+    if isinstance(snippet, dict):
+        resource = snippet.get("resourceId")
+        if isinstance(resource, dict):
+            video_id = resource.get("videoId")
+            if isinstance(video_id, str) and video_id:
+                return video_id
+        video_id = snippet.get("videoId")
+        if isinstance(video_id, str) and video_id:
+            return video_id
+    content_details = payload.get("contentDetails")
+    if isinstance(content_details, dict):
+        video_id = content_details.get("videoId")
+        if isinstance(video_id, str) and video_id:
+            return video_id
+    return None
+
+
+def fetch_listed_videos(list_type: str) -> list[dict[str, Any]]:
+    """Return listed videos filtered by list type."""
+
+    if list_type not in {"whitelist", "blacklist"}:
+        raise ValueError("list_type must be 'whitelist' or 'blacklist'")
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        target_column = (
+            ListedVideo.whitelisted_by
+            if list_type == "whitelist"
+            else ListedVideo.blacklisted_by
+        )
+        statement = (
+            select(
+                ListedVideo.video_id,
+                ListedVideo.whitelisted_by,
+                ListedVideo.blacklisted_by,
+                Video.title,
+            )
+            .select_from(ListedVideo)
+            .join(Video, Video.id == ListedVideo.video_id, isouter=True)
+            .where(target_column.is_not(None))
+            .order_by(Video.title.is_(None), Video.title, ListedVideo.video_id)
+        )
+        rows = session.exec(statement).all()
+
+    results: list[dict[str, Any]] = []
+    for video_id, whitelisted_by, blacklisted_by, title in rows:
+        results.append(
+            {
+                "video_id": video_id,
+                "title": title,
+                "whitelisted_by": _load_identifier_list(whitelisted_by),
+                "blacklisted_by": _load_identifier_list(blacklisted_by),
+            }
+        )
+    return results
+
+
+def repopulate_listed_videos() -> None:
+    """Rebuild the ListedVideo table from stored labels."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        listings: dict[str, dict[str, set[str]]] = {}
+
+        def _ensure_entry(video_id: str) -> dict[str, set[str]]:
+            entry = listings.get(video_id)
+            if entry is None:
+                entry = {"whitelisted_by": set(), "blacklisted_by": set()}
+                listings[video_id] = entry
+            return entry
+
+        # Step 1: labeled videos
+        video_stmt = (
+            select(ResourceLabel.resource_id, ResourceLabel.label)
+            .where(ResourceLabel.resource_type == "video")
+            .where(ResourceLabel.label.in_({"whitelisted", "blacklisted"}))
+        )
+        for video_id, label in session.exec(video_stmt):
+            if not video_id:
+                continue
+            entry = _ensure_entry(video_id)
+            key = "whitelisted_by" if label == "whitelisted" else "blacklisted_by"
+            entry[key].add(video_id)
+
+        # Step 2: labeled playlists
+        playlist_stmt = (
+            select(ResourceLabel.resource_id, ResourceLabel.label)
+            .where(ResourceLabel.resource_type == "playlist")
+            .where(ResourceLabel.label.in_({"whitelisted", "blacklisted"}))
+        )
+        for playlist_id, label in session.exec(playlist_stmt):
+            if not playlist_id:
+                continue
+            key = "whitelisted_by" if label == "whitelisted" else "blacklisted_by"
+            items_stmt = select(PlaylistItem).where(PlaylistItem.playlist_id == playlist_id)
+            for item in session.exec(items_stmt):
+                video_id = _extract_video_id_from_playlist_item(item.raw_json)
+                if not video_id:
+                    continue
+                entry = _ensure_entry(video_id)
+                entry[key].add(playlist_id)
+
+        # Step 3: labeled channels and their uploads playlists
+        channel_stmt = (
+            select(Channel.id, Channel.uploads_playlist, ResourceLabel.label)
+            .select_from(Channel)
+            .join(
+                ResourceLabel,
+                and_(
+                    ResourceLabel.resource_type == "channel",
+                    ResourceLabel.resource_id == Channel.id,
+                ),
+            )
+            .where(ResourceLabel.label.in_({"whitelisted", "blacklisted"}))
+        )
+        for channel_id, uploads_playlist, label in session.exec(channel_stmt):
+            if not uploads_playlist:
+                continue
+            key = "whitelisted_by" if label == "whitelisted" else "blacklisted_by"
+            items_stmt = select(PlaylistItem).where(
+                PlaylistItem.playlist_id == uploads_playlist
+            )
+            for item in session.exec(items_stmt):
+                video_id = _extract_video_id_from_playlist_item(item.raw_json)
+                if not video_id:
+                    continue
+                entry = _ensure_entry(video_id)
+                entry[key].add(channel_id)
+
+        # Persist listings
+        existing_entries = {
+            row.video_id: row for row in session.exec(select(ListedVideo)).all()
+        }
+
+        processed_ids = set(listings.keys())
+        for video_id, data in listings.items():
+            whitelist_json = _dump_identifier_list(data["whitelisted_by"])
+            blacklist_json = _dump_identifier_list(data["blacklisted_by"])
+            entry = existing_entries.get(video_id)
+            if entry:
+                entry.whitelisted_by = whitelist_json
+                entry.blacklisted_by = blacklist_json
+            else:
+                session.add(
+                    ListedVideo(
+                        video_id=video_id,
+                        whitelisted_by=whitelist_json,
+                        blacklisted_by=blacklist_json,
+                    )
+                )
+
+        if existing_entries:
+            obsolete_ids = set(existing_entries.keys()) - processed_ids
+            if obsolete_ids:
+                session.exec(
+                    delete(ListedVideo).where(ListedVideo.video_id.in_(obsolete_ids))
+                )
+
+        session.commit()
 
 
 def fetch_all_videos() -> list[dict]:
@@ -593,5 +814,7 @@ __all__ = [
     "fetch_all_videos",
     "set_resource_label",
     "fetch_resource_label",
+    "fetch_listed_videos",
+    "repopulate_listed_videos",
 ]
 

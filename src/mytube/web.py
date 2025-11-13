@@ -28,10 +28,12 @@ from .db import (
     fetch_all_videos,
     fetch_channel,
     fetch_channel_sections,
+    fetch_listed_videos,
     fetch_playlist,
     fetch_playlist_items,
     fetch_video,
     initialize_database,
+    repopulate_listed_videos,
     save_channel,
     save_channel_sections,
     save_playlist,
@@ -56,12 +58,20 @@ static_directory = BASE_DIR / "static"
 
 YOUTUBE_VIDEO_ID = "CYlon2tvywA"
 
-CONFIG_NAVIGATION = (
+RESOURCE_NAVIGATION = (
     ("channels", "Channels"),
     ("playlists", "Playlists"),
     ("videos", "Videos"),
 )
-CONFIG_LABELS = {slug: label for slug, label in CONFIG_NAVIGATION}
+LIST_NAVIGATION = (("whitelist", "Whitelist"), ("blacklist", "Blacklist"))
+CONFIG_NAVIGATION = RESOURCE_NAVIGATION + LIST_NAVIGATION
+RESOURCE_LABELS = {slug: label for slug, label in RESOURCE_NAVIGATION}
+LIST_PAGE_LABELS = {slug: label for slug, label in LIST_NAVIGATION}
+LIST_PAGE_FIELDS = {"whitelist": "whitelisted_by", "blacklist": "blacklisted_by"}
+LISTED_VIDEO_FIELD_PREFIXES = {
+    "whitelisted_by": "👍",
+    "blacklisted_by": "👎",
+}
 
 LIST_LABELS = {"white": "Whitelist", "black": "Blacklist"}
 LIST_TO_RESOURCE_LABEL = {"white": "whitelisted", "black": "blacklisted"}
@@ -70,6 +80,8 @@ CONFIG_ROUTE_NAMES = {
     "channels": "configure_channels",
     "playlists": "configure_playlists",
     "videos": "configure_videos",
+    "whitelist": "configure_whitelist",
+    "blacklist": "configure_blacklist",
 }
 
 CREATE_ROUTE_NAMES = {
@@ -81,7 +93,7 @@ CREATE_ROUTE_NAMES = {
 
 def _validate_section(section: str) -> str:
     normalized = section.lower()
-    if normalized not in CONFIG_LABELS:
+    if normalized not in RESOURCE_LABELS:
         raise HTTPException(status_code=404, detail="Unknown configuration section")
     return normalized
 
@@ -109,11 +121,21 @@ def _render_config_page(
     content: str,
     form_action: str | None = None,
     resource_value: str = "",
+    show_resource_form: bool = True,
+    navigation: list[dict[str, str | bool]] | None = None,
 ) -> HTMLResponse:
-    navigation = _navigation_links(app, active_section)
-    default_section = active_section or CONFIG_NAVIGATION[0][0]
-    default_route = CREATE_ROUTE_NAMES[default_section]
-    action = form_action or app.url_path_for(default_route)
+    navigation = navigation or _navigation_links(app, active_section)
+    action = form_action
+    if show_resource_form:
+        if not action:
+            form_section = (
+                active_section
+                if active_section in CREATE_ROUTE_NAMES
+                else next(iter(CREATE_ROUTE_NAMES))
+            )
+            action = app.url_path_for(CREATE_ROUTE_NAMES[form_section])
+    else:
+        action = action or ""
     return templates.TemplateResponse(
         "configure.html",
         {
@@ -123,6 +145,7 @@ def _render_config_page(
             "form_action": action,
             "resource_value": resource_value,
             "content_html": content,
+            "show_resource_form": show_resource_form,
         },
     )
 
@@ -220,6 +243,88 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
     return (
         "<section>"
         "<h2>Stored Videos</h2>"
+        "<ol>"
+        f"{items_html}"
+        "</ol>"
+        "</section>"
+    )
+
+
+def _listed_videos_content(
+    list_slug: str, videos: list[dict[str, Any]], regenerate_url: str
+) -> str:
+    if list_slug not in LIST_PAGE_FIELDS:
+        raise HTTPException(status_code=404, detail="Unknown list page")
+
+    heading_label = LIST_PAGE_LABELS.get(list_slug, list_slug.title())
+    primary_field = LIST_PAGE_FIELDS[list_slug]
+    primary_prefix = LISTED_VIDEO_FIELD_PREFIXES[primary_field]
+    secondary_field = (
+        "blacklisted_by" if primary_field == "whitelisted_by" else "whitelisted_by"
+    )
+    secondary_prefix = LISTED_VIDEO_FIELD_PREFIXES[secondary_field]
+
+    button_html = (
+        f"<form class=\"regenerate-form\" method=\"post\" action=\"{html.escape(regenerate_url)}\">"
+        "<button type=\"submit\">Regenerate</button>"
+        "</form>"
+    )
+
+    if not videos:
+        return (
+            "<section>"
+            f"<h2>{heading_label} Videos</h2>"
+            f"{button_html}"
+            "<p>No videos have been recorded yet.</p>"
+            "</section>"
+        )
+
+    items: list[str] = []
+    for video in videos:
+        video_id = video.get("video_id") or ""
+        if not video_id:
+            continue
+        title = video.get("title") or video_id
+        encoded_video_id = quote(video_id, safe="")
+        link = (
+            f"<a href=\"/configure/videos/{encoded_video_id}\">{html.escape(title)}</a>"
+        )
+        identifier_lines: list[str] = []
+        primary_values = [
+            value
+            for value in (video.get(primary_field) or [])
+            if isinstance(value, str) and value
+        ]
+        if primary_values:
+            joined_primary = ", ".join(html.escape(value) for value in primary_values)
+            identifier_lines.append(
+                f"<small>{primary_prefix} {joined_primary}</small>"
+            )
+        secondary_values = [
+            value
+            for value in (video.get(secondary_field) or [])
+            if isinstance(value, str) and value
+        ]
+        if secondary_values:
+            joined_secondary = ", ".join(html.escape(value) for value in secondary_values)
+            identifier_lines.append(
+                f"<small>{secondary_prefix} {joined_secondary}</small>"
+            )
+        identifiers_html = "<br>".join(identifier_lines)
+        if identifiers_html:
+            identifiers_html = f"<br>{identifiers_html}"
+        items.append(
+            "<li>"
+            f"{link}"
+            f"{identifiers_html}"
+            "</li>"
+        )
+
+    items_html = "".join(items)
+    return (
+        "<section>"
+        f"<h2>{heading_label} Videos</h2>"
+        f"{button_html}"
         "<ol>"
         f"{items_html}"
         "</ol>"
@@ -586,7 +691,7 @@ def create_app() -> FastAPI:
     async def configure_channels(request: Request) -> HTMLResponse:
         channels = await run_in_threadpool(fetch_all_channels)
         content = _channels_overview_content(channels)
-        heading = f"Manage {CONFIG_LABELS['channels']}"
+        heading = f"Manage {RESOURCE_LABELS['channels']}"
         return _render_config_page(
             request,
             app,
@@ -604,7 +709,7 @@ def create_app() -> FastAPI:
     async def configure_playlists(request: Request) -> HTMLResponse:
         playlists = await run_in_threadpool(fetch_all_playlists)
         content = _playlists_overview_content(playlists)
-        heading = f"Manage {CONFIG_LABELS['playlists']}"
+        heading = f"Manage {RESOURCE_LABELS['playlists']}"
         return _render_config_page(
             request,
             app,
@@ -622,7 +727,7 @@ def create_app() -> FastAPI:
     async def configure_videos(request: Request) -> HTMLResponse:
         videos = await run_in_threadpool(fetch_all_videos)
         content = _videos_overview_content(videos)
-        heading = f"Manage {CONFIG_LABELS['videos']}"
+        heading = f"Manage {RESOURCE_LABELS['videos']}"
         return _render_config_page(
             request,
             app,
@@ -630,6 +735,48 @@ def create_app() -> FastAPI:
             active_section="videos",
             content=content,
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["videos"]),
+        )
+
+    @app.get(
+        "/configure/whitelist",
+        response_class=HTMLResponse,
+        name="configure_whitelist",
+    )
+    async def configure_whitelist(request: Request) -> HTMLResponse:
+        videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
+        regenerate_url = app.url_path_for(
+            "regenerate_listed_videos", list_slug="whitelist"
+        )
+        content = _listed_videos_content("whitelist", videos, regenerate_url)
+        heading = f"{LIST_PAGE_LABELS['whitelist']} Videos"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section="whitelist",
+            content=content,
+            show_resource_form=False,
+        )
+
+    @app.get(
+        "/configure/blacklist",
+        response_class=HTMLResponse,
+        name="configure_blacklist",
+    )
+    async def configure_blacklist(request: Request) -> HTMLResponse:
+        videos = await run_in_threadpool(fetch_listed_videos, "blacklist")
+        regenerate_url = app.url_path_for(
+            "regenerate_listed_videos", list_slug="blacklist"
+        )
+        content = _listed_videos_content("blacklist", videos, regenerate_url)
+        heading = f"{LIST_PAGE_LABELS['blacklist']} Videos"
+        return _render_config_page(
+            request,
+            app,
+            heading=heading,
+            active_section="blacklist",
+            content=content,
+            show_resource_form=False,
         )
 
     @app.post("/configure/channels", name="create_channel")
@@ -817,6 +964,23 @@ def create_app() -> FastAPI:
         )
         return RedirectResponse(redirect_url, status_code=303)
 
+    @app.post(
+        "/configure/{list_slug}/regenerate",
+        name="regenerate_listed_videos",
+    )
+    async def regenerate_listed_videos_endpoint(list_slug: str) -> Response:
+        normalized = list_slug.lower()
+        if normalized not in LIST_PAGE_FIELDS:
+            raise HTTPException(status_code=404, detail="Unknown list page")
+
+        await run_in_threadpool(repopulate_listed_videos)
+
+        redirect_route = CONFIG_ROUTE_NAMES.get(normalized)
+        if not redirect_route:  # pragma: no cover - defensive
+            raise HTTPException(status_code=500, detail="Unable to determine redirect route")
+        redirect_url = app.url_path_for(redirect_route)
+        return RedirectResponse(redirect_url, status_code=303)
+
     @app.get(
         "/configure/{section}/{resource_id}",
         response_class=HTMLResponse,
@@ -883,7 +1047,7 @@ def create_app() -> FastAPI:
             content = _video_resource_content(video)
         else:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail="Unsupported configuration section")
-        heading = f"{CONFIG_LABELS[normalized_section]} Resource"
+        heading = f"{RESOURCE_LABELS[normalized_section]} Resource"
         return _render_config_page(
             request,
             app,
