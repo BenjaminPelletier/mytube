@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -284,7 +284,11 @@ def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
     )
 
 
-def _channel_resource_content(channel: dict | None, sections: list[dict]) -> str:
+def _channel_resource_content(
+    channel: dict | None,
+    sections: list[dict],
+    playlist_map: dict[str, dict] | None = None,
+) -> str:
     if not channel:
         return (
             "<section>"
@@ -310,15 +314,61 @@ def _channel_resource_content(channel: dict | None, sections: list[dict]) -> str
         f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
     )
 
-    if sections:
-        section_items: list[str] = []
-        for section in sections:
-            title_text = section.get("title")
+    playlist_map = playlist_map or {}
+    section_items: list[str] = []
+    for section in sections or []:
+        raw = section.get("raw_json") if isinstance(section, dict) else None
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:  # pragma: no cover - defensive
+                raw = None
+        if not raw and isinstance(section, dict):
+            raw = section
+        raw = raw if isinstance(raw, dict) else {}
+
+        content_details = raw.get("contentDetails")
+        if not isinstance(content_details, dict):
+            continue
+
+        playlists_value = content_details.get("playlists")
+        playlist_ids: list[str] = []
+        if isinstance(playlists_value, list):
+            playlist_ids = [
+                playlist_id
+                for playlist_id in playlists_value
+                if isinstance(playlist_id, str) and playlist_id
+            ]
+        elif isinstance(playlists_value, str) and playlists_value:
+            playlist_ids = [playlists_value]
+
+        if len(playlist_ids) == 1:
+            playlist_id = playlist_ids[0]
+            playlist_record = playlist_map.get(playlist_id)
+            playlist_title = (
+                playlist_record.get("title") if isinstance(playlist_record, dict) else None
+            )
+            display_text = playlist_title or playlist_id
+            encoded_playlist_id = quote(playlist_id, safe="")
+            display_html = (
+                f"<a href=\"/configure/playlists/{encoded_playlist_id}\">"
+                f"{html.escape(display_text)}"
+                "</a>"
+            )
+        else:
+            title_text = section.get("title") if isinstance(section, dict) else None
             if not title_text:
-                raw = section.get("raw_json") or {}
                 snippet = raw.get("snippet") if isinstance(raw, dict) else {}
-                title_text = (snippet or {}).get("title") or section.get("id") or "Untitled"
-            section_items.append(f"<li>{html.escape(title_text)}</li>")
+                if isinstance(snippet, dict):
+                    title_text = snippet.get("title")
+            if not title_text and isinstance(section, dict):
+                title_text = section.get("id")
+            title_text = title_text or "Untitled"
+            display_html = html.escape(title_text)
+
+        section_items.append(f"<li>{display_html}</li>")
+
+    if section_items:
         sections_html = (
             "<h3>Channel Sections</h3>"
             "<ol>"
@@ -774,7 +824,7 @@ def create_app() -> FastAPI:
         request: Request,
         section: str,
         resource_id: str,
-        list: str | None = None,
+        list_choice: str | None = Query(None, alias="list"),
     ) -> HTMLResponse:
         normalized_section = _validate_section(section)
         if normalized_section == "playlists":
@@ -783,14 +833,49 @@ def create_app() -> FastAPI:
             )
             playlist = await run_in_threadpool(fetch_playlist, resource_id)
             content = _playlist_resource_content(
-                resource_id, playlist_items, list, playlist
+                resource_id, playlist_items, list_choice, playlist
             )
         elif normalized_section == "channels":
             channel = await run_in_threadpool(fetch_channel, resource_id)
             channel_sections = await run_in_threadpool(
                 fetch_channel_sections, resource_id
             )
-            content = _channel_resource_content(channel, channel_sections)
+
+            playlist_map: dict[str, dict] = {}
+            if channel_sections:
+                def _fetch_section_playlists() -> dict[str, dict]:
+                    playlist_ids: set[str] = set()
+                    for section in channel_sections:
+                        raw = section.get("raw_json") if isinstance(section, dict) else None
+                        if isinstance(raw, str):
+                            try:
+                                raw = json.loads(raw)
+                            except json.JSONDecodeError:  # pragma: no cover - defensive
+                                raw = None
+                        if not raw and isinstance(section, dict):
+                            raw = section
+                        if not isinstance(raw, dict):
+                            continue
+                        content_details = raw.get("contentDetails")
+                        if not isinstance(content_details, dict):
+                            continue
+                        playlists_value = content_details.get("playlists")
+                        if isinstance(playlists_value, list):
+                            for playlist_id in playlists_value:
+                                if isinstance(playlist_id, str) and playlist_id:
+                                    playlist_ids.add(playlist_id)
+                        elif isinstance(playlists_value, str) and playlists_value:
+                            playlist_ids.add(playlists_value)
+
+                    playlist_map: dict[str, dict] = {}
+                    for playlist_id in playlist_ids:
+                        playlist = fetch_playlist(playlist_id)
+                        if isinstance(playlist, dict):
+                            playlist_map[playlist_id] = playlist
+                    return playlist_map
+
+                playlist_map = await run_in_threadpool(_fetch_section_playlists)
+            content = _channel_resource_content(channel, channel_sections, playlist_map)
         elif normalized_section == "videos":
             video = await run_in_threadpool(fetch_video, resource_id)
             content = _video_resource_content(video)
