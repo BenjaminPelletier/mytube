@@ -659,6 +659,23 @@ def fetch_listed_videos(list_type: str) -> list[dict[str, Any]]:
     return results
 
 
+def fetch_listed_video(video_id: str) -> dict[str, Any] | None:
+    """Return the listed video entry for a specific video."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        record = session.get(ListedVideo, video_id)
+
+    if not record:
+        return None
+
+    return {
+        "video_id": record.video_id,
+        "whitelisted_by": _load_identifier_list(record.whitelisted_by),
+        "blacklisted_by": _load_identifier_list(record.blacklisted_by),
+    }
+
+
 def repopulate_listed_videos() -> None:
     """Rebuild the ListedVideo table from stored labels."""
 
@@ -815,6 +832,7 @@ __all__ = [
     "set_resource_label",
     "fetch_resource_label",
     "fetch_listed_videos",
+    "fetch_listed_video",
     "repopulate_listed_videos",
 ]
 
