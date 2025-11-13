@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
@@ -28,6 +28,7 @@ from .db import (
     fetch_all_videos,
     fetch_channel,
     fetch_channel_sections,
+    fetch_listed_video,
     fetch_listed_videos,
     fetch_playlist,
     fetch_playlist_items,
@@ -615,7 +616,110 @@ def _playlist_resource_content(
     )
 
 
-def _video_resource_content(video: dict | None) -> str:
+def _build_resource_reference_map(
+    identifiers: Iterable[str],
+) -> dict[str, dict[str, str]]:
+    """Resolve identifiers to stored resource metadata."""
+
+    results: dict[str, dict[str, str]] = {}
+    for identifier in identifiers:
+        if not isinstance(identifier, str):
+            continue
+        normalized = identifier.strip()
+        if not normalized or normalized in results:
+            continue
+
+        channel = fetch_channel(normalized)
+        if channel:
+            title = channel.get("title") or normalized
+            encoded = quote(normalized, safe="")
+            results[normalized] = {
+                "title": title,
+                "url": f"/configure/channels/{encoded}",
+            }
+            continue
+
+        playlist = fetch_playlist(normalized)
+        if playlist:
+            title = playlist.get("title") or normalized
+            encoded = quote(normalized, safe="")
+            results[normalized] = {
+                "title": title,
+                "url": f"/configure/playlists/{encoded}",
+            }
+            continue
+
+        video = fetch_video(normalized)
+        if video:
+            title = video.get("title") or normalized
+            encoded = quote(normalized, safe="")
+            results[normalized] = {
+                "title": title,
+                "url": f"/configure/videos/{encoded}",
+            }
+            continue
+
+        encoded = quote(normalized, safe="")
+        results[normalized] = {
+            "title": normalized,
+            "url": f"/configure/videos/{encoded}",
+        }
+
+    return results
+
+
+def _format_listed_line(
+    prefix: str,
+    identifiers: list[str],
+    reference_map: dict[str, dict[str, str]],
+) -> str:
+    items: list[str] = []
+    for identifier in identifiers:
+        if not isinstance(identifier, str):
+            continue
+        normalized = identifier.strip()
+        if not normalized:
+            continue
+        info = reference_map.get(normalized)
+        if info:
+            title_text = html.escape(info.get("title") or normalized)
+            url = info.get("url") or f"/configure/videos/{quote(normalized, safe='')}"
+        else:
+            title_text = html.escape(normalized)
+            url = f"/configure/videos/{quote(normalized, safe='')}"
+        escaped_url = html.escape(url, quote=True)
+        items.append(f"<a href=\"{escaped_url}\">{title_text}</a>")
+
+    if not items:
+        return ""
+
+    joined = ", ".join(items)
+    return f"<p>{prefix} {joined}</p>"
+
+
+def _format_listed_lines(
+    listed_video: dict[str, Any] | None,
+    reference_map: dict[str, dict[str, str]] | None,
+) -> str:
+    if not listed_video:
+        return ""
+
+    effective_map = reference_map or {}
+    lines: list[str] = []
+    for key, icon in (("whitelisted_by", "👍"), ("blacklisted_by", "👎")):
+        identifiers = listed_video.get(key)
+        if isinstance(identifiers, list):
+            line_html = _format_listed_line(icon, identifiers, effective_map)
+            if line_html:
+                lines.append(line_html)
+    return "".join(lines)
+
+
+def _video_resource_content(
+    video: dict | None,
+    listed_video: dict[str, Any] | None = None,
+    reference_map: dict[str, dict[str, str]] | None = None,
+) -> str:
     if not video:
         return (
             "<section>"
@@ -662,10 +766,13 @@ def _video_resource_content(video: dict | None) -> str:
         "</h2>"
     )
 
+    listed_lines_html = _format_listed_lines(listed_video, reference_map)
+
     return (
         "<section>"
         f"{heading}"
         f"<p><small>ID: {video_id}</small></p>"
+        f"{listed_lines_html}"
         f"{description_html}"
         f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
         "</section>"
@@ -1183,7 +1290,31 @@ def create_app() -> FastAPI:
             content = _channel_resource_content(channel, channel_sections, playlist_map)
         elif normalized_section == "videos":
             video = await run_in_threadpool(fetch_video, resource_id)
-            content = _video_resource_content(video)
+            listed_video = await run_in_threadpool(
+                fetch_listed_video, resource_id
+            )
+
+            reference_map: dict[str, dict[str, str]] = {}
+            if listed_video:
+                identifiers: set[str] = set()
+                for key in ("whitelisted_by", "blacklisted_by"):
+                    entries = listed_video.get(key) or []
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        if not isinstance(entry, str):
+                            continue
+                        normalized_entry = entry.strip()
+                        if normalized_entry:
+                            identifiers.add(normalized_entry)
+                if identifiers:
+                    reference_map = await run_in_threadpool(
+                        _build_resource_reference_map, identifiers
+                    )
+
+            content = _video_resource_content(
+                video, listed_video, reference_map
+            )
         else:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail="Unsupported configuration section")
         heading = f"{RESOURCE_LABELS[normalized_section]} Resource"
