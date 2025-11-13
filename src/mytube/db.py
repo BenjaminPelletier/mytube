@@ -223,6 +223,40 @@ def fetch_playlist(playlist_id: str) -> dict | None:
     }
 
 
+def fetch_all_playlists() -> list[dict]:
+    """Return stored playlist records including their labels."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(Playlist.id, Playlist.title, Playlist.retrieved_at, ResourceLabel.label)
+            .select_from(Playlist)
+            .join(
+                ResourceLabel,
+                and_(
+                    ResourceLabel.resource_type == "playlist",
+                    ResourceLabel.resource_id == Playlist.id,
+                ),
+                isouter=True,
+            )
+            .order_by(
+                ResourceLabel.label.is_(None),
+                Playlist.retrieved_at.desc(),
+                Playlist.id,
+            )
+        )
+        rows = session.exec(statement).all()
+    return [
+        {
+            "id": row[0],
+            "title": row[1],
+            "retrieved_at": row[2],
+            "label": row[3],
+        }
+        for row in rows
+    ]
+
+
 def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
     """Insert or update a YouTube channel record."""
 
@@ -531,6 +565,7 @@ __all__ = [
     "fetch_channel",
     "fetch_channel_sections",
     "fetch_video",
+    "fetch_all_playlists",
     "fetch_all_channels",
     "fetch_all_videos",
     "set_resource_label",

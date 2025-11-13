@@ -24,6 +24,7 @@ from .casting import (
 )
 from .db import (
     fetch_all_channels,
+    fetch_all_playlists,
     fetch_all_videos,
     fetch_channel,
     fetch_channel_sections,
@@ -255,6 +256,52 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
     return (
         "<section>"
         "<h2>Stored Videos</h2>"
+        "<ol>"
+        f"{items_html}"
+        "</ol>"
+        "</section>"
+    )
+
+
+def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
+    if not playlists:
+        return (
+            "<section>"
+            "<h2>Stored Playlists</h2>"
+            "<p>No playlists have been stored yet.</p>"
+            "</section>"
+        )
+
+    items: list[str] = []
+    for playlist in playlists:
+        playlist_id = playlist.get("id") or ""
+        if not playlist_id:
+            continue
+        title = playlist.get("title") or playlist_id
+        retrieved_at = playlist.get("retrieved_at") or "Unknown"
+        vote = _resource_vote(playlist.get("label"))
+        encoded_id = quote(playlist_id, safe="")
+        link = f"<a href=\"/configure/playlists/{encoded_id}\">{html.escape(title)}</a>"
+        vote_display = f" {vote}" if vote else ""
+        items.append(
+            "<li>"
+            f"{link}{vote_display}"
+            f"<br><small>Retrieved: {html.escape(retrieved_at)}</small>"
+            "</li>"
+        )
+
+    if not items:
+        return (
+            "<section>"
+            "<h2>Stored Playlists</h2>"
+            "<p>No playlists have been stored yet.</p>"
+            "</section>"
+        )
+
+    items_html = "".join(items)
+    return (
+        "<section>"
+        "<h2>Stored Playlists</h2>"
         "<ol>"
         f"{items_html}"
         "</ol>"
@@ -513,6 +560,9 @@ def create_app() -> FastAPI:
         if normalized_section == "channels":
             channels = await run_in_threadpool(fetch_all_channels)
             content = _channels_overview_content(channels)
+        elif normalized_section == "playlists":
+            playlists = await run_in_threadpool(fetch_all_playlists)
+            content = _playlists_overview_content(playlists)
         elif normalized_section == "videos":
             videos = await run_in_threadpool(fetch_all_videos)
             content = _videos_overview_content(videos)
