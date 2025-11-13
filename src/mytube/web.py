@@ -539,6 +539,15 @@ def create_app() -> FastAPI:
                 sections_items = sections_data.get("items") or []
             playlist_ids: list[str] = []
             playlist_id_set: set[str] = set()
+
+            uploads_playlist_id = (
+                ((channel_data.get("contentDetails") or {}).get("relatedPlaylists") or {})
+                .get("uploads")
+            )
+            if isinstance(uploads_playlist_id, str) and uploads_playlist_id:
+                playlist_id_set.add(uploads_playlist_id)
+                playlist_ids.append(uploads_playlist_id)
+
             for section in sections_items:
                 if not isinstance(section, dict):
                     continue
