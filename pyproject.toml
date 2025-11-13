@@ -12,6 +12,7 @@ dependencies = [
     "PyChromecast>=13.0",
     "uvicorn>=0.22",
     "python-multipart>=0.0.9",
+    "sqlmodel>=0.0.14",
 ]
 
 [project.scripts]
