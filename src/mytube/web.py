@@ -758,13 +758,18 @@ def create_app() -> FastAPI:
             [stripped_resource_id], api_key
         )
         playlist_data = playlist_metadata_items[0] if playlist_metadata_items else None
-        if playlist_data:
-            now = datetime.now(timezone.utc)
+        label = LIST_TO_RESOURCE_LABEL.get(list_choice)
+        if label is None:
+            raise HTTPException(status_code=400, detail="Unknown list selection")
 
-            def _persist_playlist() -> None:
-                save_playlist(playlist_data, retrieved_at=now)
+        retrieved_at = datetime.now(timezone.utc)
 
-            await run_in_threadpool(_persist_playlist)
+        def _persist_playlist() -> None:
+            if playlist_data:
+                save_playlist(playlist_data, retrieved_at=retrieved_at)
+            set_resource_label("playlist", stripped_resource_id, label)
+
+        await run_in_threadpool(_persist_playlist)
 
         redirect_url = app.url_path_for(
             "view_resource",
