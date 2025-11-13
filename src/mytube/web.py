@@ -24,9 +24,11 @@ from .casting import (
 from .db import (
     fetch_channel,
     fetch_playlist_items,
+    fetch_video,
     initialize_database,
     save_channel,
     save_playlist_items,
+    save_video,
     set_resource_label,
 )
 from .youtube import fetch_youtube_section_data, load_youtube_api_key
@@ -72,18 +74,6 @@ HARD_CODED_RESOURCES = {
             "title": "FastAPI Tutorials",
             "description": "A curated list of introductory FastAPI tutorials.",
             "items": "12 videos",
-        },
-    },
-    "videos": {
-        "CYlon2tvywA": {
-            "title": "Introducing MyTube",
-            "description": "An overview of the MyTube Chromecast remote prototype.",
-            "duration": "9 minutes",
-        },
-        "kLhFQnK0HXg": {
-            "title": "FastAPI in 15 Minutes",
-            "description": "A rapid introduction to building web apps with FastAPI.",
-            "duration": "15 minutes",
         },
     },
 }
@@ -267,6 +257,45 @@ def _playlist_resource_content(
     )
 
 
+def _video_resource_content(video: dict | None) -> str:
+    if not video:
+        return (
+            "<section>"
+            "<h2>Video Not Found</h2>"
+            "<p>No stored data is available for this video. Submit the identifier "
+            "through the form to fetch it from YouTube.</p>"
+            "</section>"
+        )
+
+    video_id = html.escape(video.get("id", ""))
+    title = html.escape(video.get("title") or "Untitled video")
+    description = html.escape(video.get("description") or "")
+    retrieved_at = html.escape(video.get("retrieved_at") or "Unknown")
+    label = video.get("label")
+    if label == "whitelisted":
+        vote = "👍"
+    elif label == "blacklisted":
+        vote = "👎"
+    else:
+        vote = ""
+
+    description_html = (
+        f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
+    )
+    json_payload = html.escape(json.dumps(video.get("raw_json") or {}, indent=2, sort_keys=True))
+
+    return (
+        "<section>"
+        f"<h2>{title} {vote}</h2>"
+        f"<p><small>ID: {video_id}</small></p>"
+        f"{description_html}"
+        f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
+        f"<h3>YouTube API Response</h3>"
+        f"<pre class=\"api-response\">{json_payload}</pre>"
+        "</section>"
+    )
+
+
 def _api_response_content(
     resource_id: str,
     list_choice: str,
@@ -400,6 +429,28 @@ def create_app() -> FastAPI:
             )
             return RedirectResponse(redirect_url, status_code=303)
 
+        if normalized_section == "videos":
+            items = response_data.get("items") or []
+            if not items:
+                raise HTTPException(status_code=404, detail="Video not found")
+            video_data = items[0]
+            video_id = video_data.get("id") or stripped_resource_id
+            label = LIST_TO_RESOURCE_LABEL.get(list_choice)
+            if label is None:
+                raise HTTPException(status_code=400, detail="Unknown list selection")
+
+            def _persist_video() -> None:
+                save_video(video_data, retrieved_at=datetime.now(timezone.utc))
+                set_resource_label("video", video_id, label)
+
+            await run_in_threadpool(_persist_video)
+            redirect_url = app.url_path_for(
+                "view_resource",
+                section=normalized_section,
+                resource_id=video_id,
+            )
+            return RedirectResponse(redirect_url, status_code=303)
+
         content = _api_response_content(
             stripped_resource_id, list_choice, request_url, response_data
         )
@@ -434,6 +485,9 @@ def create_app() -> FastAPI:
         elif normalized_section == "channels":
             channel = await run_in_threadpool(fetch_channel, resource_id)
             content = _channel_resource_content(channel)
+        elif normalized_section == "videos":
+            video = await run_in_threadpool(fetch_video, resource_id)
+            content = _video_resource_content(video)
         else:
             content = _resource_detail_content(normalized_section, resource_id, list)
         heading = f"{CONFIG_LABELS[normalized_section]} Resource"

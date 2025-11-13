@@ -62,6 +62,17 @@ def initialize_database() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS videos (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                description TEXT,
+                raw_json TEXT NOT NULL,
+                retrieved_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
@@ -167,6 +178,43 @@ def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
         )
 
 
+def save_video(video: dict, *, retrieved_at: datetime) -> None:
+    """Insert or update a YouTube video record."""
+
+    video_id = video.get("id")
+    if not video_id:
+        raise ValueError("Video data is missing an 'id'")
+
+    snippet = video.get("snippet") or {}
+    title = snippet.get("title")
+    description = snippet.get("description")
+    raw_json = json.dumps(video, separators=(",", ":"))
+    with _get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO videos (
+                id,
+                title,
+                description,
+                raw_json,
+                retrieved_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                raw_json=excluded.raw_json,
+                retrieved_at=excluded.retrieved_at
+            """,
+            (
+                video_id,
+                title,
+                description,
+                raw_json,
+                retrieved_at.isoformat(),
+            ),
+        )
+
+
 def fetch_channel(channel_id: str) -> Optional[dict]:
     """Fetch a stored YouTube channel record."""
 
@@ -182,6 +230,37 @@ def fetch_channel(channel_id: str) -> Optional[dict]:
         row = cursor.fetchone()
         label = (
             fetch_resource_label("channel", channel_id, connection=connection)
+            if row
+            else None
+        )
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "description": row["description"],
+        "raw_json": json.loads(row["raw_json"]),
+        "retrieved_at": row["retrieved_at"],
+        "label": label,
+        "whitelist": label == "whitelisted" if label is not None else False,
+    }
+
+
+def fetch_video(video_id: str) -> Optional[dict]:
+    """Fetch a stored YouTube video record."""
+
+    with _get_connection() as connection:
+        cursor = connection.execute(
+            """
+            SELECT id, title, description, raw_json, retrieved_at
+            FROM videos
+            WHERE id = ?
+            """,
+            (video_id,),
+        )
+        row = cursor.fetchone()
+        label = (
+            fetch_resource_label("video", video_id, connection=connection)
             if row
             else None
         )
@@ -254,7 +333,9 @@ __all__ = [
     "save_playlist_items",
     "fetch_playlist_items",
     "save_channel",
+    "save_video",
     "fetch_channel",
+    "fetch_video",
     "set_resource_label",
     "fetch_resource_label",
 ]
