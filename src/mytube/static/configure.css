@@ -128,3 +128,28 @@ h1 {
 .configure-content dd {
   margin: 0;
 }
+
+.resource-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.resource-title-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.resource-info-link {
+  font-size: 1.25rem;
+  line-height: 1;
+  text-decoration: none;
+  color: inherit;
+}
+
+.resource-info-link:hover,
+.resource-info-link:focus {
+  opacity: 0.75;
+}
