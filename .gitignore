@@ -125,3 +125,4 @@ dmypy.json
 
 # Private information
 .youtube-apikey
+/todo.txt
