@@ -72,7 +72,7 @@ async def fetch_youtube_section_data(
         endpoint = "playlistItems"
     elif section == "channels":
         params = {
-            "part": "snippet,statistics",
+            "part": "snippet,statistics,contentDetails",
             "key": api_key,
         }
         if resource_id.startswith("@"):  # Handle input
