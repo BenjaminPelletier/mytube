@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,13 @@ from .casting import (
     cast_youtube_video,
     discover_chromecast_names,
 )
-from .db import fetch_playlist_items, initialize_database, save_playlist_items
+from .db import (
+    fetch_channel,
+    fetch_playlist_items,
+    initialize_database,
+    save_channel,
+    save_playlist_items,
+)
 from .youtube import fetch_youtube_section_data, load_youtube_api_key
 
 logger = logging.getLogger(__name__)
@@ -188,6 +195,37 @@ def _resource_detail_content(section: str, resource_id: str, list_choice: str | 
     )
 
 
+def _channel_resource_content(channel: dict | None) -> str:
+    if not channel:
+        return (
+            "<section>"
+            "<h2>Channel Not Found</h2>"
+            "<p>No stored data is available for this channel. Submit the identifier "
+            "through the form to fetch it from YouTube.</p>"
+            "</section>"
+        )
+
+    channel_id = html.escape(channel.get("id", ""))
+    title = html.escape(channel.get("title") or "Untitled channel")
+    description = html.escape(channel.get("description") or "")
+    retrieved_at = html.escape(channel.get("retrieved_at") or "Unknown")
+    whitelist = channel.get("whitelist", False)
+    vote = "👍" if whitelist else "👎"
+
+    description_html = (
+        f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
+    )
+
+    return (
+        "<section>"
+        f"<h2>{title} {vote}</h2>"
+        f"<p><small>ID: {channel_id}</small></p>"
+        f"{description_html}"
+        f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
+        "</section>"
+    )
+
+
 def _playlist_resource_content(
     playlist_id: str, playlist_items: list[dict[str, Any]], list_choice: str | None
 ) -> str:
@@ -333,6 +371,25 @@ def create_app() -> FastAPI:
             if list_choice in LIST_LABELS:
                 redirect_url = f"{redirect_url}?list={list_choice}"
             return RedirectResponse(redirect_url, status_code=303)
+        if normalized_section == "channels":
+            items = response_data.get("items") or []
+            if not items:
+                raise HTTPException(status_code=404, detail="Channel not found")
+            channel_data = items[0]
+            channel_id = channel_data.get("id") or stripped_resource_id
+            await run_in_threadpool(
+                lambda: save_channel(
+                    channel_data,
+                    retrieved_at=datetime.now(timezone.utc),
+                    whitelist=list_choice == "white",
+                )
+            )
+            redirect_url = app.url_path_for(
+                "view_resource",
+                section=normalized_section,
+                resource_id=channel_id,
+            )
+            return RedirectResponse(redirect_url, status_code=303)
 
         content = _api_response_content(
             stripped_resource_id, list_choice, request_url, response_data
@@ -365,6 +422,9 @@ def create_app() -> FastAPI:
                 fetch_playlist_items, resource_id
             )
             content = _playlist_resource_content(resource_id, playlist_items, list)
+        elif normalized_section == "channels":
+            channel = await run_in_threadpool(fetch_channel, resource_id)
+            content = _channel_resource_content(channel)
         else:
             content = _resource_detail_content(normalized_section, resource_id, list)
         heading = f"{CONFIG_LABELS[normalized_section]} Resource"
