@@ -404,7 +404,9 @@ def _channel_resource_content(
             "</section>"
         )
 
-    channel_id = html.escape(channel.get("id", ""))
+    channel_identifier = channel.get("id") or ""
+    channel_id = html.escape(channel_identifier)
+    encoded_channel_id = quote(channel_identifier, safe="")
     title = html.escape(channel.get("title") or "Untitled channel")
     description = html.escape(channel.get("description") or "")
     retrieved_at = html.escape(channel.get("retrieved_at") or "Unknown")
@@ -487,9 +489,29 @@ def _channel_resource_content(
             "<p><em>No channel sections stored.</em></p>"
         )
 
+    vote_display = f" {vote}" if vote else ""
+    info_link = (
+        ""
+        if not encoded_channel_id
+        else (
+            " <a class=\"resource-info-link\" "
+            "href=\"/configure/channels/"
+            f"{encoded_channel_id}/raw\" "
+            "title=\"View raw YouTube data\" "
+            "aria-label=\"View raw YouTube data\">🛈</a>"
+        )
+    )
+
+    heading = (
+        "<h2 class=\"resource-title\">"
+        f"<span class=\"resource-title-text\">{title}{vote_display}</span>"
+        f"{info_link}"
+        "</h2>"
+    )
+
     return (
         "<section>"
-        f"<h2>{title} {vote}</h2>"
+        f"{heading}"
         f"<p><small>ID: {channel_id}</small></p>"
         f"{description_html}"
         f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
@@ -505,6 +527,7 @@ def _playlist_resource_content(
     playlist: dict | None,
 ) -> str:
     escaped_id = html.escape(playlist_id)
+    encoded_playlist_id = quote(str(playlist_id), safe="")
     if playlist:
         title = html.escape(playlist.get("title") or playlist_id)
         raw_data = playlist.get("raw_json") if isinstance(playlist, dict) else None
@@ -522,8 +545,22 @@ def _playlist_resource_content(
             else:
                 channel_display = channel_title_text
             channel_line = f"<p>{channel_display}</p>"
+        info_link = (
+            ""
+            if not encoded_playlist_id
+            else (
+                " <a class=\"resource-info-link\" "
+                "href=\"/configure/playlists/"
+                f"{encoded_playlist_id}/raw\" "
+                "title=\"View raw YouTube data\" "
+                "aria-label=\"View raw YouTube data\">🛈</a>"
+            )
+        )
         heading = (
-            f"<h2>{title}</h2>"
+            "<h2 class=\"resource-title\">"
+            f"<span class=\"resource-title-text\">{title}</span>"
+            f"{info_link}"
+            "</h2>"
             f"{channel_line}"
             f"<p><small>ID: {escaped_id}</small></p>"
         )
@@ -588,7 +625,9 @@ def _video_resource_content(video: dict | None) -> str:
             "</section>"
         )
 
-    video_id = html.escape(video.get("id", ""))
+    video_identifier = video.get("id") or ""
+    video_id = html.escape(video_identifier)
+    encoded_video_id = quote(video_identifier, safe="")
     title = html.escape(video.get("title") or "Untitled video")
     description = html.escape(video.get("description") or "")
     retrieved_at = html.escape(video.get("retrieved_at") or "Unknown")
@@ -603,16 +642,32 @@ def _video_resource_content(video: dict | None) -> str:
     description_html = (
         f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
     )
-    json_payload = html.escape(json.dumps(video.get("raw_json") or {}, indent=2, sort_keys=True))
+
+    vote_display = f" {vote}" if vote else ""
+    info_link = (
+        ""
+        if not encoded_video_id
+        else (
+            " <a class=\"resource-info-link\" "
+            "href=\"/configure/videos/"
+            f"{encoded_video_id}/raw\" "
+            "title=\"View raw YouTube data\" "
+            "aria-label=\"View raw YouTube data\">🛈</a>"
+        )
+    )
+    heading = (
+        "<h2 class=\"resource-title\">"
+        f"<span class=\"resource-title-text\">{title}{vote_display}</span>"
+        f"{info_link}"
+        "</h2>"
+    )
 
     return (
         "<section>"
-        f"<h2>{title} {vote}</h2>"
+        f"{heading}"
         f"<p><small>ID: {video_id}</small></p>"
         f"{description_html}"
         f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
-        f"<h3>YouTube API Response</h3>"
-        f"<pre class=\"api-response\">{json_payload}</pre>"
         "</section>"
     )
 
@@ -635,7 +690,19 @@ def _api_response_content(
         f"<h2>YouTube API response for <code>{escaped_id}</code></h2>"
         f"{list_summary}"
         f"<p><strong>Endpoint:</strong> {html.escape(request_url)}</p>"
-        f"<pre class=\"api-response\">{json_payload}</pre>"
+        f"<pre class=\"api-response\"><code>{json_payload}</code></pre>"
+        "</section>"
+    )
+
+
+def _raw_payload_content(resource_label: str, resource_id: str, payload: Any) -> str:
+    escaped_id = html.escape(resource_id)
+    formatted_json = html.escape(json.dumps(payload, indent=2, sort_keys=True))
+    return (
+        "<section>"
+        f"<h2>{resource_label} API response</h2>"
+        f"<p><small>ID: {escaped_id}</small></p>"
+        f"<pre class=\"raw-json\"><code>{formatted_json}</code></pre>"
         "</section>"
     )
 
@@ -980,6 +1047,78 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail="Unable to determine redirect route")
         redirect_url = app.url_path_for(redirect_route)
         return RedirectResponse(redirect_url, status_code=303)
+
+    @app.get(
+        "/configure/channels/{resource_id}/raw",
+        response_class=HTMLResponse,
+        name="view_channel_raw",
+    )
+    async def view_channel_raw(request: Request, resource_id: str) -> HTMLResponse:
+        channel = await run_in_threadpool(fetch_channel, resource_id)
+        if not channel:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        raw_payload = channel.get("raw_json")
+        if raw_payload is None:
+            raise HTTPException(
+                status_code=404, detail="Channel raw data is unavailable"
+            )
+        content = _raw_payload_content("Channel", resource_id, raw_payload)
+        return _render_config_page(
+            request,
+            app,
+            heading="Channel raw data",
+            active_section="channels",
+            content=content,
+            show_resource_form=False,
+        )
+
+    @app.get(
+        "/configure/playlists/{resource_id}/raw",
+        response_class=HTMLResponse,
+        name="view_playlist_raw",
+    )
+    async def view_playlist_raw(request: Request, resource_id: str) -> HTMLResponse:
+        playlist = await run_in_threadpool(fetch_playlist, resource_id)
+        if not playlist:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        raw_payload = playlist.get("raw_json")
+        if raw_payload is None:
+            raise HTTPException(
+                status_code=404, detail="Playlist raw data is unavailable"
+            )
+        content = _raw_payload_content("Playlist", resource_id, raw_payload)
+        return _render_config_page(
+            request,
+            app,
+            heading="Playlist raw data",
+            active_section="playlists",
+            content=content,
+            show_resource_form=False,
+        )
+
+    @app.get(
+        "/configure/videos/{resource_id}/raw",
+        response_class=HTMLResponse,
+        name="view_video_raw",
+    )
+    async def view_video_raw(request: Request, resource_id: str) -> HTMLResponse:
+        video = await run_in_threadpool(fetch_video, resource_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        raw_payload = video.get("raw_json")
+        if raw_payload is None:
+            raise HTTPException(
+                status_code=404, detail="Video raw data is unavailable"
+            )
+        content = _raw_payload_content("Video", resource_id, raw_payload)
+        return _render_config_page(
+            request,
+            app,
+            heading="Video raw data",
+            active_section="videos",
+            content=content,
+            show_resource_form=False,
+        )
 
     @app.get(
         "/configure/{section}/{resource_id}",

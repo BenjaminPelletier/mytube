@@ -128,3 +128,45 @@ h1 {
 .configure-content dd {
   margin: 0;
 }
+
+.configure-content pre {
+  margin: 0;
+  padding: 1rem;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
+  border-radius: 0.65rem;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.configure-content pre code {
+  display: block;
+  white-space: pre;
+}
+
+.resource-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.resource-title-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.resource-info-link {
+  font-size: 1.25rem;
+  line-height: 1;
+  text-decoration: none;
+  color: inherit;
+}
+
+.resource-info-link:hover,
+.resource-info-link:focus {
+  opacity: 0.75;
+}
