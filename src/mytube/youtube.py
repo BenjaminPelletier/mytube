@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 import urllib.error
@@ -119,10 +120,34 @@ async def fetch_youtube_playlist(playlist_id: str, api_key: str) -> tuple[str, d
     return await run_in_threadpool(_youtube_api_request, "playlists", params)
 
 
+async def fetch_youtube_playlists(
+    playlist_ids: Iterable[str], api_key: str
+) -> list[dict[str, Any]]:
+    """Fetch metadata for multiple YouTube playlists."""
+
+    ids = [playlist_id for playlist_id in playlist_ids if playlist_id]
+    if not ids:
+        return []
+
+    items: list[dict[str, Any]] = []
+    chunk_size = 50  # Maximum number of playlist IDs per API call
+    for index in range(0, len(ids), chunk_size):
+        chunk = ids[index : index + chunk_size]
+        params = {
+            "part": "snippet,contentDetails",
+            "id": ",".join(chunk),
+            "key": api_key,
+        }
+        _, data = await run_in_threadpool(_youtube_api_request, "playlists", params)
+        items.extend(data.get("items") or [])
+    return items
+
+
 __all__ = [
     "fetch_youtube_section_data",
     "fetch_youtube_channel_sections",
     "fetch_youtube_playlist",
+    "fetch_youtube_playlists",
     "load_youtube_api_key",
 ]
 
