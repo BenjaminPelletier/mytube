@@ -13,6 +13,35 @@ p.description {
   margin-top: 0;
 }
 
+.now-playing {
+  margin: 1.25rem 0 1.75rem;
+  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.75rem;
+  background: #fafafa;
+}
+
+.now-playing .caption {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+  color: #222;
+}
+
+.now-playing .thumbnail {
+  display: block;
+  max-width: min(320px, 100%);
+  width: min(320px, 100%);
+  height: auto;
+  border-radius: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.now-playing .title {
+  margin: 0;
+  font-weight: 600;
+  color: #111;
+}
+
 ul {
   padding-left: 1.2rem;
 }

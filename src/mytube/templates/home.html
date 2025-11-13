@@ -8,6 +8,15 @@
   <body>
     <h1>MyTube Remote</h1>
     <p class="description">Kick off the featured recommendation on your Chromecast.</p>
+    {% if playing %}
+    <section class="now-playing">
+      <p class="caption">Playing:</p>
+      {% if playing.thumbnail_url %}
+      <img class="thumbnail" src="{{ playing.thumbnail_url }}" alt="Thumbnail for {{ playing.title }}">
+      {% endif %}
+      <p class="title">{{ playing.title }}</p>
+    </section>
+    {% endif %}
     <ul>
       <li><a id="cast-link" href="{{ cast_url }}">Play the featured video</a></li>
     </ul>

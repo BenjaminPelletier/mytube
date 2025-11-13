@@ -808,6 +808,60 @@ def _raw_payload_content(resource_label: str, resource_id: str, payload: Any) ->
     )
 
 
+def _select_thumbnail_url(raw_video: Any, desired_width: int = 320) -> str | None:
+    if not isinstance(raw_video, dict):
+        return None
+
+    snippet = raw_video.get("snippet")
+    if not isinstance(snippet, dict):
+        return None
+
+    thumbnails = snippet.get("thumbnails")
+    if not isinstance(thumbnails, dict):
+        return None
+
+    best_url: str | None = None
+    best_diff = float("inf")
+    best_width: int | None = None
+    fallback_url: str | None = None
+
+    for data in thumbnails.values():
+        if not isinstance(data, dict):
+            continue
+        url = data.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        if fallback_url is None:
+            fallback_url = url
+        width_value = data.get("width")
+        width = width_value if isinstance(width_value, int) else None
+        if width is None:
+            continue
+        diff = abs(width - desired_width)
+        if diff < best_diff:
+            best_diff = diff
+            best_url = url
+            best_width = width
+        elif diff == best_diff and best_width is not None and width > best_width:
+            best_url = url
+            best_width = width
+
+    if best_url:
+        return best_url
+    return fallback_url
+
+
+def _build_playing_context(video_record: dict[str, Any], video_id: str) -> dict[str, str | None]:
+    title = video_record.get("title") or video_id
+    raw_payload = video_record.get("raw_json")
+    thumbnail_url = _select_thumbnail_url(raw_payload)
+    return {
+        "title": title,
+        "thumbnail_url": thumbnail_url,
+        "video_id": video_id,
+    }
+
+
 def create_app() -> FastAPI:
     """Create a configured FastAPI application instance."""
 
@@ -817,7 +871,11 @@ def create_app() -> FastAPI:
     if static_directory.exists():
         app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
-    def _render(request: Request, status: str | None = None) -> HTMLResponse:
+    def _render(
+        request: Request,
+        status: str | None = None,
+        playing: dict[str, str | None] | None = None,
+    ) -> HTMLResponse:
         return templates.TemplateResponse(
             "home.html",
             {
@@ -825,12 +883,45 @@ def create_app() -> FastAPI:
                 "cast_url": app.url_path_for("cast_featured"),
                 "devices_url": app.url_path_for("list_devices"),
                 "status": status,
+                "playing": playing,
             },
         )
 
     @app.get("/", response_class=HTMLResponse)
-    async def home(request: Request) -> HTMLResponse:
-        return _render(request)
+    async def home(
+        request: Request, playing: str | None = Query(default=None, min_length=1)
+    ) -> HTMLResponse:
+        playing_video: dict[str, str | None] | None = None
+        status_message: str | None = None
+
+        if playing:
+            video_id = playing.strip()
+            if video_id:
+                video_record = await run_in_threadpool(fetch_video, video_id)
+                needs_refresh = not video_record or not video_record.get("raw_json")
+
+                if needs_refresh:
+                    api_key = load_youtube_api_key()
+                    _, payload = await fetch_youtube_videos(video_id, api_key)
+                    items = payload.get("items") or []
+                    if items:
+                        video = items[0]
+                        await run_in_threadpool(
+                            save_video,
+                            video,
+                            retrieved_at=datetime.now(timezone.utc),
+                        )
+                        video_record = await run_in_threadpool(fetch_video, video_id)
+                    else:
+                        status_message = "No video information available for that ID."
+                        video_record = None
+
+                if video_record and video_record.get("raw_json"):
+                    playing_video = _build_playing_context(video_record, video_id)
+                elif not status_message:
+                    status_message = "Unable to load video details."
+
+        return _render(request, status=status_message, playing=playing_video)
 
     @app.get("/configure", response_class=HTMLResponse)
     async def configure_home(request: Request) -> HTMLResponse:
