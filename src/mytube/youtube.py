@@ -92,5 +92,20 @@ async def fetch_youtube_section_data(
     return await run_in_threadpool(_youtube_api_request, endpoint, params)
 
 
-__all__ = ["fetch_youtube_section_data", "load_youtube_api_key"]
+async def fetch_youtube_playlist(playlist_id: str, api_key: str) -> tuple[str, dict[str, Any]]:
+    """Fetch metadata for a YouTube playlist."""
+
+    params = {
+        "part": "snippet,contentDetails",  # snippet contains title/description
+        "id": playlist_id,
+        "key": api_key,
+    }
+    return await run_in_threadpool(_youtube_api_request, "playlists", params)
+
+
+__all__ = [
+    "fetch_youtube_section_data",
+    "fetch_youtube_playlist",
+    "load_youtube_api_key",
+]
 

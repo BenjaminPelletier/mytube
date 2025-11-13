@@ -26,15 +26,21 @@ from .db import (
     fetch_all_channels,
     fetch_all_videos,
     fetch_channel,
+    fetch_playlist,
     fetch_playlist_items,
     fetch_video,
     initialize_database,
     save_channel,
+    save_playlist,
     save_playlist_items,
     save_video,
     set_resource_label,
 )
-from .youtube import fetch_youtube_section_data, load_youtube_api_key
+from .youtube import (
+    fetch_youtube_playlist,
+    fetch_youtube_section_data,
+    load_youtube_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -327,9 +333,20 @@ def _channel_resource_content(channel: dict | None) -> str:
 
 
 def _playlist_resource_content(
-    playlist_id: str, playlist_items: list[dict[str, Any]], list_choice: str | None
+    playlist_id: str,
+    playlist_items: list[dict[str, Any]],
+    list_choice: str | None,
+    playlist: dict | None,
 ) -> str:
     escaped_id = html.escape(playlist_id)
+    if playlist:
+        title = html.escape(playlist.get("title") or playlist_id)
+        heading = (
+            f"<h2>{title}</h2>"
+            f"<p><small>ID: {escaped_id}</small></p>"
+        )
+    else:
+        heading = f"<h2>Playlist <code>{escaped_id}</code></h2>"
     list_summary = (
         f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
         if list_choice in LIST_LABELS
@@ -338,7 +355,7 @@ def _playlist_resource_content(
     if not playlist_items:
         return (
             "<section>"
-            f"<h2>Playlist <code>{escaped_id}</code></h2>"
+            f"{heading}"
             f"{list_summary}"
             "<p>No stored playlist items for this playlist.</p>"
             "</section>"
@@ -352,7 +369,7 @@ def _playlist_resource_content(
     items_html = "".join(titles)
     return (
         "<section>"
-        f"<h2>Playlist <code>{escaped_id}</code></h2>"
+        f"{heading}"
         f"{list_summary}"
         "<p>Stored playlist item titles:</p>"
         f"<ol>{items_html}</ol>"
@@ -509,6 +526,17 @@ def create_app() -> FastAPI:
             await run_in_threadpool(
                 save_playlist_items, stripped_resource_id, playlist_items
             )
+            _, playlist_metadata = await fetch_youtube_playlist(
+                stripped_resource_id, api_key
+            )
+            playlist_data = (playlist_metadata.get("items") or [None])[0]
+            if playlist_data:
+                now = datetime.now(timezone.utc)
+
+                def _persist_playlist() -> None:
+                    save_playlist(playlist_data, retrieved_at=now)
+
+                await run_in_threadpool(_persist_playlist)
             redirect_url = app.url_path_for(
                 "view_resource",
                 section=normalized_section,
@@ -591,7 +619,10 @@ def create_app() -> FastAPI:
             playlist_items = await run_in_threadpool(
                 fetch_playlist_items, resource_id
             )
-            content = _playlist_resource_content(resource_id, playlist_items, list)
+            playlist = await run_in_threadpool(fetch_playlist, resource_id)
+            content = _playlist_resource_content(
+                resource_id, playlist_items, list, playlist
+            )
         elif normalized_section == "channels":
             channel = await run_in_threadpool(fetch_channel, resource_id)
             content = _channel_resource_content(channel)

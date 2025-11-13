@@ -19,7 +19,7 @@ def _get_connection() -> sqlite3.Connection:
 
 
 def initialize_database() -> None:
-    """Ensure the playlist items, channels, and resource label tables exist."""
+    """Ensure the playlist, playlist item, channel, and resource tables exist."""
 
     with _get_connection() as connection:
         connection.execute(
@@ -39,6 +39,17 @@ def initialize_database() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id
             ON playlist_items(playlist_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS playlists (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                description TEXT,
+                raw_json TEXT NOT NULL,
+                retrieved_at TEXT NOT NULL
+            )
             """
         )
         connection.execute(
@@ -141,6 +152,72 @@ def fetch_playlist_items(playlist_id: str) -> list[dict]:
     return [json.loads(row["raw_json"]) for row in rows]
 
 
+def save_playlist(playlist: dict, *, retrieved_at: datetime) -> None:
+    """Insert or update a YouTube playlist record."""
+
+    playlist_id = playlist.get("id")
+    if not playlist_id:
+        raise ValueError("Playlist data is missing an 'id'")
+
+    snippet = playlist.get("snippet") or {}
+    title = snippet.get("title")
+    description = snippet.get("description")
+    raw_json = json.dumps(playlist, separators=(",", ":"))
+    with _get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO playlists (
+                id,
+                title,
+                description,
+                raw_json,
+                retrieved_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title=excluded.title,
+                description=excluded.description,
+                raw_json=excluded.raw_json,
+                retrieved_at=excluded.retrieved_at
+            """,
+            (
+                playlist_id,
+                title,
+                description,
+                raw_json,
+                retrieved_at.isoformat(),
+            ),
+        )
+
+
+def fetch_playlist(playlist_id: str) -> Optional[dict]:
+    """Fetch a stored YouTube playlist record."""
+
+    with _get_connection() as connection:
+        cursor = connection.execute(
+            """
+            SELECT id, title, description, raw_json, retrieved_at
+            FROM playlists
+            WHERE id = ?
+            """,
+            (playlist_id,),
+        )
+        row = cursor.fetchone()
+        label = (
+            fetch_resource_label("playlist", playlist_id, connection=connection)
+            if row
+            else None
+        )
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "description": row["description"],
+        "raw_json": json.loads(row["raw_json"]),
+        "retrieved_at": row["retrieved_at"],
+        "label": label,
+        "whitelist": label == "whitelisted" if label is not None else False,
+    }
 def save_channel(channel: dict, *, retrieved_at: datetime) -> None:
     """Insert or update a YouTube channel record."""
 
@@ -382,6 +459,8 @@ __all__ = [
     "initialize_database",
     "save_playlist_items",
     "fetch_playlist_items",
+    "save_playlist",
+    "fetch_playlist",
     "save_channel",
     "save_video",
     "fetch_channel",
