@@ -51,16 +51,6 @@ def initialize_database() -> None:
             )
             """
         )
-
-        _ensure_channels_table(connection)
-
-
-def _ensure_channels_table(connection: sqlite3.Connection) -> None:
-    """Create or migrate the channels table to the latest schema."""
-
-    cursor = connection.execute("PRAGMA table_info(channels)")
-    rows = cursor.fetchall()
-    if not rows:
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS channels (
@@ -72,52 +62,6 @@ def _ensure_channels_table(connection: sqlite3.Connection) -> None:
             )
             """
         )
-        return
-
-    column_names = {row["name"] for row in rows}
-    if "whitelist" not in column_names:
-        # The schema is already up to date.
-        return
-
-    connection.execute("ALTER TABLE channels RENAME TO channels_old")
-    connection.execute(
-        """
-        CREATE TABLE channels (
-            id TEXT PRIMARY KEY,
-            title TEXT,
-            description TEXT,
-            raw_json TEXT NOT NULL,
-            retrieved_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        INSERT INTO channels (id, title, description, raw_json, retrieved_at)
-        SELECT id, title, description, raw_json, retrieved_at FROM channels_old
-        """
-    )
-    legacy_labels = connection.execute(
-        "SELECT id, whitelist FROM channels_old"
-    ).fetchall()
-    if legacy_labels:
-        connection.executemany(
-            """
-            INSERT INTO resource_labels (resource_type, resource_id, label)
-            VALUES (?, ?, ?)
-            ON CONFLICT(resource_type, resource_id) DO UPDATE SET
-                label=excluded.label
-            """,
-            [
-                (
-                    "channel",
-                    row["id"],
-                    "whitelisted" if row["whitelist"] else "blacklisted",
-                )
-                for row in legacy_labels
-            ],
-        )
-    connection.execute("DROP TABLE channels_old")
 
 
 def save_playlist_items(playlist_id: str, items: Iterable[dict]) -> None:
