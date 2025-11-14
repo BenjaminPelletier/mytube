@@ -17,18 +17,9 @@
       <p class="title">{{ playing.title }}</p>
     </section>
     {% endif %}
-    {% if videos %}
-    <section class="video-options">
-      {% for video in videos %}
-      <a class="video-option" href="{{ video.cast_url }}" data-cast-url="{{ video.cast_url }}">
-        <img class="video-thumbnail" src="{{ video.thumbnail_url }}" alt="Thumbnail for {{ video.title }}" width="320">
-        <span class="video-title">{{ video.title }}</span>
-      </a>
-      {% endfor %}
-    </section>
-    {% else %}
-    <p class="empty-state">No approved videos are available to cast.</p>
-    {% endif %}
+    <section class="video-options" aria-live="polite"></section>
+    <button id="refresh-videos" class="video-refresh" type="button" aria-label="Load new videos" hidden>🗘</button>
+    <p class="empty-state" id="video-empty">Loading videos…</p>
     {% if status %}
     <p class="status">{{ status }}</p>
     {% endif %}
@@ -42,8 +33,11 @@
     </div>
     <script>
       (() => {
-        const videoOptions = Array.from(document.querySelectorAll(".video-option"));
-        if (!videoOptions.length) {
+        const videoContainer = document.querySelector(".video-options");
+        const refreshButton = document.getElementById("refresh-videos");
+        const emptyState = document.getElementById("video-empty");
+        const videosApiUrl = "{{ videos_api_url }}";
+        if (!videoContainer || !videosApiUrl) {
           return;
         }
 
@@ -128,9 +122,110 @@
           }
         };
 
-        videoOptions.forEach((option) => {
-          option.addEventListener("click", handleCastClick);
-        });
+        const setLoadingState = (isLoading) => {
+          if (refreshButton) {
+            refreshButton.disabled = isLoading;
+            if (isLoading) {
+              refreshButton.setAttribute("aria-busy", "true");
+            } else {
+              refreshButton.removeAttribute("aria-busy");
+            }
+          }
+          if (videoContainer) {
+            videoContainer.setAttribute("aria-busy", String(isLoading));
+          }
+          if (emptyState && isLoading) {
+            emptyState.textContent = "Loading videos…";
+            emptyState.hidden = false;
+          }
+        };
+
+        const renderVideos = (videos) => {
+          videoContainer.innerHTML = "";
+          const validVideos = Array.isArray(videos) ? videos : [];
+          if (!validVideos.length) {
+            if (emptyState) {
+              emptyState.textContent = "No approved videos are available to cast.";
+              emptyState.hidden = false;
+            }
+            return;
+          }
+
+          const fragment = document.createDocumentFragment();
+
+          validVideos.forEach((video) => {
+            if (!video || typeof video !== "object") {
+              return;
+            }
+            const castUrl = typeof video.cast_url === "string" ? video.cast_url : "";
+            const thumbnailUrl = typeof video.thumbnail_url === "string" ? video.thumbnail_url : "";
+            const title = typeof video.title === "string" ? video.title : "";
+
+            if (!castUrl || !thumbnailUrl || !title) {
+              return;
+            }
+
+            const option = document.createElement("a");
+            option.className = "video-option";
+            option.href = castUrl;
+            option.dataset.castUrl = castUrl;
+
+            const thumbnail = document.createElement("img");
+            thumbnail.className = "video-thumbnail";
+            thumbnail.src = thumbnailUrl;
+            thumbnail.alt = `Thumbnail for ${title}`;
+            thumbnail.width = 320;
+
+            const label = document.createElement("span");
+            label.className = "video-title";
+            label.textContent = title;
+
+            option.appendChild(thumbnail);
+            option.appendChild(label);
+            option.addEventListener("click", handleCastClick);
+
+            fragment.appendChild(option);
+          });
+
+          videoContainer.appendChild(fragment);
+
+          if (emptyState) {
+            emptyState.hidden = true;
+          }
+        };
+
+        const loadVideos = async () => {
+          setLoadingState(true);
+          try {
+            const response = await fetch(videosApiUrl, {
+              headers: { Accept: "application/json" },
+            });
+            if (!response.ok) {
+              throw new Error("Failed to load videos");
+            }
+
+            const payload = await response.json();
+            renderVideos(payload.videos);
+          } catch (error) {
+            console.error(error);
+            videoContainer.innerHTML = "";
+            if (emptyState) {
+              emptyState.textContent = "Unable to load videos.";
+              emptyState.hidden = false;
+            }
+          } finally {
+            setLoadingState(false);
+            if (refreshButton) {
+              refreshButton.hidden = false;
+            }
+          }
+        };
+
+        if (refreshButton) {
+          refreshButton.addEventListener("click", () => {
+            loadVideos();
+          });
+        }
 
         if (cancelButton) {
           cancelButton.addEventListener("click", () => {
@@ -145,6 +240,8 @@
             }
           });
         }
+
+        loadVideos();
       })();
     </script>
   </body>

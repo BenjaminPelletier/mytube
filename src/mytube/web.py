@@ -689,6 +689,7 @@ def create_app() -> FastAPI:
                 "request": request,
                 "cast_url": app.url_path_for("cast_featured"),
                 "devices_url": app.url_path_for("list_devices"),
+                "videos_api_url": app.url_path_for("list_random_videos"),
                 "status": status,
                 "playing": playing,
                 "videos": videos or [],
@@ -701,7 +702,6 @@ def create_app() -> FastAPI:
     ) -> HTMLResponse:
         playing_video: dict[str, str | None] | None = None
         status_message: str | None = None
-        video_options: list[dict[str, str | None]] = []
 
         if playing:
             video_id = playing.strip()
@@ -715,16 +715,31 @@ def create_app() -> FastAPI:
                 elif not status_message:
                     status_message = "Unable to load video details."
 
+        return _render(
+            request,
+            status=status_message,
+            playing=playing_video,
+            videos=[],
+        )
+
+    async def _random_video_options(limit: int = 5) -> list[dict[str, str | None]]:
+        if limit <= 0:
+            return []
+
         listed_videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
         approved_videos = [
             video
             for video in listed_videos
             if video.get("video_id") and not video.get("blacklisted_by")
         ]
+        if not approved_videos:
+            return []
+
         random.shuffle(approved_videos)
 
+        video_options: list[dict[str, str | None]] = []
         for entry in approved_videos:
-            if len(video_options) >= 5:
+            if len(video_options) >= limit:
                 break
             video_id = entry.get("video_id")
             if not video_id:
@@ -748,12 +763,14 @@ def create_app() -> FastAPI:
                 }
             )
 
-        return _render(
-            request,
-            status=status_message,
-            playing=playing_video,
-            videos=video_options,
-        )
+        return video_options
+
+    @app.get("/videos/random", name="list_random_videos")
+    async def list_random_videos(limit: int = Query(default=5, ge=1, le=20)) -> dict[str, Any]:
+        """Return a random selection of approved videos."""
+
+        videos = await _random_video_options(limit=limit)
+        return {"videos": videos}
 
     @app.get("/configure", response_class=HTMLResponse)
     async def configure_home(request: Request) -> HTMLResponse:
