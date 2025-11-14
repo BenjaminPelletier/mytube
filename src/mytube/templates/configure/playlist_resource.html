@@ -1,0 +1,51 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+{% if playlist.title %}
+<section>
+  <h2 class="resource-title">
+    <span class="resource-title-text">{{ playlist.title }}</span>
+    {% if playlist.info_url %}
+    <a
+      class="resource-info-link"
+      href="{{ playlist.info_url }}"
+      title="View raw YouTube data"
+      aria-label="View raw YouTube data"
+    >🛈</a>
+    {% endif %}
+  </h2>
+  {% if playlist.channel %}
+  <p>
+    {% if playlist.channel.url %}
+    <a href="{{ playlist.channel.url }}">{{ playlist.channel.title }}</a>
+    {% else %}
+    {{ playlist.channel.title }}
+    {% endif %}
+  </p>
+  {% endif %}
+  <p><small>ID: {{ playlist.id }}</small></p>
+{% else %}
+<section>
+  <h2>Playlist <code>{{ playlist.id }}</code></h2>
+{% endif %}
+  {% if playlist.list_label %}
+  <p><strong>List preference:</strong> {{ playlist.list_label }}</p>
+  {% endif %}
+  {% if playlist.items %}
+  <p>Stored playlist item titles:</p>
+  <ol>
+    {% for item in playlist.items %}
+    <li>
+      {% if item.video_url %}
+      <a href="{{ item.video_url }}">{{ item.title }}</a>
+      {% else %}
+      {{ item.title }}
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No stored playlist items for this playlist.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section>
+  <h2>{{ resource_label }} API response</h2>
+  <p><small>ID: {{ resource_id }}</small></p>
+  <pre class="raw-json"><code>{{ payload_json }}</code></pre>
+</section>
+{% endblock %}

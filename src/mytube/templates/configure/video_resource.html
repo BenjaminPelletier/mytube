@@ -1,0 +1,44 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+{% if video %}
+<section>
+  <h2 class="resource-title">
+    <span class="resource-title-text">
+      {{ video.title }}{% if video.vote %} {{ video.vote }}{% endif %}
+    </span>
+    {% if video.info_url %}
+    <a
+      class="resource-info-link"
+      href="{{ video.info_url }}"
+      title="View raw YouTube data"
+      aria-label="View raw YouTube data"
+    >🛈</a>
+    {% endif %}
+  </h2>
+  <p><small>ID: {{ video.id }}</small></p>
+  {% for group in video.listed_groups %}
+  <p class="resource-vote-line">
+    {{ group.icon }}
+    {% for entry in group.entries %}
+      <a href="{{ entry.url }}">{{ entry.title }}</a>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endfor %}
+  {% if video.description %}
+  <p>{{ video.description }}</p>
+  {% else %}
+  <p><em>No description provided.</em></p>
+  {% endif %}
+  <p><strong>Retrieved:</strong> {{ video.retrieved_at }}</p>
+</section>
+{% else %}
+<section>
+  <h2>Video Not Found</h2>
+  <p>
+    No stored data is available for this video. Submit the identifier through the
+    form to fetch it from YouTube.
+  </p>
+</section>
+{% endif %}
+{% endblock %}

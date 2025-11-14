@@ -1,0 +1,25 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section>
+  <h2>Stored Playlists</h2>
+  {% if playlists %}
+  <ol>
+    {% for playlist in playlists %}
+    <li>
+      [
+      {% if playlist.channel and playlist.channel.url %}
+      <a href="{{ playlist.channel.url }}">{{ playlist.channel.title }}</a>
+      {% else %}
+      {{ playlist.channel.title }}
+      {% endif %}
+      ]
+      <a href="{{ playlist.url }}">{{ playlist.title }}</a>{% if playlist.vote %} {{ playlist.vote }}{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No playlists have been stored yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

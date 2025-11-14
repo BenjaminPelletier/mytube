@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import json
 import logging
 import random
@@ -125,7 +124,8 @@ def _render_config_page(
     *,
     heading: str,
     active_section: str | None,
-    content: str,
+    template_name: str,
+    context: dict[str, Any] | None = None,
     form_action: str | None = None,
     resource_value: str = "",
     show_resource_form: bool = True,
@@ -143,18 +143,17 @@ def _render_config_page(
             action = app.url_path_for(CREATE_ROUTE_NAMES[form_section])
     else:
         action = action or ""
-    return templates.TemplateResponse(
-        "configure.html",
-        {
-            "request": request,
-            "heading": heading,
-            "navigation": navigation,
-            "form_action": action,
-            "resource_value": resource_value,
-            "content_html": content,
-            "show_resource_form": show_resource_form,
-        },
-    )
+    template_context: dict[str, Any] = {
+        "request": request,
+        "heading": heading,
+        "navigation": navigation,
+        "form_action": action,
+        "resource_value": resource_value,
+        "show_resource_form": show_resource_form,
+    }
+    if context:
+        template_context.update(context)
+    return templates.TemplateResponse(template_name, template_context)
 
 
 def _resource_vote(label: str | None) -> str:
@@ -165,16 +164,8 @@ def _resource_vote(label: str | None) -> str:
     return ""
 
 
-def _channels_overview_content(channels: list[dict[str, Any]]) -> str:
-    if not channels:
-        return (
-            "<section>"
-            "<h2>Stored Channels</h2>"
-            "<p>No channels have been stored yet.</p>"
-            "</section>"
-        )
-
-    items = []
+def _channels_overview_content(channels: list[dict[str, Any]]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
     for channel in channels:
         channel_id = channel.get("id") or ""
         if not channel_id:
@@ -182,43 +173,18 @@ def _channels_overview_content(channels: list[dict[str, Any]]) -> str:
         title = channel.get("title") or channel_id
         vote = _resource_vote(channel.get("label"))
         encoded_id = quote(channel_id, safe="")
-        link = f"<a href=\"/configure/channels/{encoded_id}\">{html.escape(title)}</a>"
-        vote_display = f" {vote}" if vote else ""
         items.append(
-            "<li>"
-            f"{link}{vote_display}"
-            "</li>"
+            {
+                "title": title,
+                "url": f"/configure/channels/{encoded_id}",
+                "vote": vote,
+            }
         )
-
-    if not items:
-        return (
-            "<section>"
-            "<h2>Stored Channels</h2>"
-            "<p>No channels have been stored yet.</p>"
-            "</section>"
-        )
-
-    items_html = "".join(items)
-    return (
-        "<section>"
-        "<h2>Stored Channels</h2>"
-        "<ol>"
-        f"{items_html}"
-        "</ol>"
-        "</section>"
-    )
+    return items
 
 
-def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
-    if not videos:
-        return (
-            "<section>"
-            "<h2>Stored Videos</h2>"
-            "<p>No videos have been stored yet.</p>"
-            "</section>"
-        )
-
-    items = []
+def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
     for video in videos:
         video_id = video.get("id") or ""
         if not video_id:
@@ -226,59 +192,23 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
         title = video.get("title") or video_id
         vote = _resource_vote(video.get("label"))
         encoded_id = quote(video_id, safe="")
-        link = f"<a href=\"/configure/videos/{encoded_id}\">{html.escape(title)}</a>"
-        vote_display = f" {vote}" if vote else ""
         items.append(
-            "<li>"
-            f"{link}{vote_display}"
-            "</li>"
+            {
+                "title": title,
+                "url": f"/configure/videos/{encoded_id}",
+                "vote": vote,
+            }
         )
-
-    if not items:
-        return (
-            "<section>"
-            "<h2>Stored Videos</h2>"
-            "<p>No videos have been stored yet.</p>"
-            "</section>"
-        )
-
-    items_html = "".join(items)
-    return (
-        "<section>"
-        "<h2>Stored Videos</h2>"
-        "<ol>"
-        f"{items_html}"
-        "</ol>"
-        "</section>"
-    )
+    return items
 
 
 def _listed_videos_content(
     list_slug: str, videos: list[dict[str, Any]], regenerate_url: str
-) -> str:
+) -> dict[str, Any]:
     if list_slug not in LIST_PAGE_FIELDS:
         raise HTTPException(status_code=404, detail="Unknown list page")
 
     heading_label = LIST_PAGE_LABELS.get(list_slug, list_slug.title())
-    primary_field = LIST_PAGE_FIELDS[list_slug]
-    secondary_field = (
-        "blacklisted_by" if primary_field == "whitelisted_by" else "whitelisted_by"
-    )
-
-    button_html = (
-        f"<form class=\"regenerate-form\" method=\"post\" action=\"{html.escape(regenerate_url)}\">"
-        "<button type=\"submit\">Regenerate</button>"
-        "</form>"
-    )
-
-    if not videos:
-        return (
-            "<section>"
-            f"<h2>{heading_label} Videos</h2>"
-            f"{button_html}"
-            "<p>No videos have been recorded yet.</p>"
-            "</section>"
-        )
 
     identifier_pool: set[str] = set()
     for video in videos:
@@ -298,35 +228,26 @@ def _listed_videos_content(
         else {}
     )
 
-    items: list[str] = []
+    items: list[dict[str, Any]] = []
     for video in videos:
         video_id = video.get("video_id") or ""
         if not video_id:
             continue
         title = video.get("title") or video_id
         encoded_video_id = quote(video_id, safe="")
-        link = (
-            f"<a href=\"/configure/videos/{encoded_video_id}\">{html.escape(title)}</a>"
-        )
-        listed_lines = _format_listed_lines(video, reference_map)
-        identifiers_html = listed_lines or ""
         items.append(
-            "<li>"
-            f"{link}"
-            f"{identifiers_html}"
-            "</li>"
+            {
+                "title": title,
+                "url": f"/configure/videos/{encoded_video_id}",
+                "listed_groups": _build_listed_groups(video, reference_map),
+            }
         )
 
-    items_html = "".join(items)
-    return (
-        "<section>"
-        f"<h2>{heading_label} Videos</h2>"
-        f"{button_html}"
-        "<ol>"
-        f"{items_html}"
-        "</ol>"
-        "</section>"
-    )
+    return {
+        "heading_label": heading_label,
+        "regenerate_url": regenerate_url,
+        "videos": items,
+    }
 
 
 def _settings_content(
@@ -334,165 +255,13 @@ def _settings_content(
     settings: dict[str, str],
     save_url: str,
     pair_url: str,
-) -> str:
-    devices_endpoint = json.dumps(devices_url)
-    pair_endpoint = json.dumps(pair_url)
-    settings_json = json.dumps(settings or {})
-    escaped_save_url = html.escape(save_url, quote=True)
-    return (
-        "<section class=\"settings-section\">"
-        "<h2>Playback Settings</h2>"
-        "<p>Choose the Chromecast device MyTube should prioritize when casting.</p>"
-        f"<form class=\"settings-form\" method=\"post\" action=\"{escaped_save_url}\">"
-        "<div class=\"settings-group\">"
-        "<label class=\"settings-label\" for=\"preferred-device\">Preferred casting device</label>"
-        "<select id=\"preferred-device\" name=\"preferred_device\" class=\"settings-select\" disabled>"
-        "<option>Loading devices...</option>"
-        "</select>"
-        "</div>"
-        "<div class=\"settings-actions\">"
-        "<button type=\"submit\" class=\"settings-save-button\">Save Settings</button>"
-        "</div>"
-        "</form>"
-        "</section>"
-        "<section class=\"settings-section\">"
-        "<h2>YouTube App Pairing</h2>"
-        "<p>Link MyTube with the YouTube app to cast directly from your TV.</p>"
-        "<form id=\"youtube-pair-form\" class=\"pair-form\" novalidate>"
-        "<label class=\"pair-label\" for=\"youtube-link-code\">Link with TV code</label>"
-        "<div class=\"pair-fields\">"
-        "<input id=\"youtube-link-code\" name=\"link_code\" class=\"pair-input\" type=\"text\" autocomplete=\"off\" placeholder=\"XXX XXX XXX XXX\" required>"
-        "<button type=\"submit\" id=\"youtube-pair-button\" class=\"pair-button\">Pair</button>"
-        "</div>"
-        "<p class=\"settings-help\">Find the code in the YouTube app under Settings → Link with TV code.</p>"
-        "</form>"
-        "<dialog id=\"settings-error-dialog\" class=\"settings-modal\" aria-labelledby=\"settings-error-title\">"
-        "<form method=\"dialog\" class=\"settings-modal-content\">"
-        "<h3 id=\"settings-error-title\">Pairing error</h3>"
-        "<p id=\"settings-error-message\"></p>"
-        "<button type=\"submit\" value=\"close\" class=\"settings-modal-close\">Close</button>"
-        "</form>"
-        "</dialog>"
-        "<script>(function(){"
-        "const select=document.getElementById('preferred-device');"
-        f"const settings={settings_json};"
-        "const preferredRaw=settings && typeof settings.preferred_device==='string'?settings.preferred_device:'';"
-        "const preferred=preferredRaw.trim();"
-        "const setSingleOption=(label)=>{"
-        "if(!select){return;}"
-        "select.innerHTML='';"
-        "const option=document.createElement('option');"
-        "option.textContent=label;"
-        "option.value='';"
-        "option.disabled=true;"
-        "option.selected=true;"
-        "select.append(option);"
-        "select.disabled=true;"
-        "};"
-        "const enableSelect=(devices)=>{"
-        "if(!select){return;}"
-        "select.innerHTML='';"
-        "const noneOption=document.createElement('option');"
-        "noneOption.textContent='No preferred device';"
-        "noneOption.value='';"
-        "select.append(noneOption);"
-        "let matched=false;"
-        "devices.forEach((name)=>{"
-        "if(typeof name!=='string'){return;}"
-        "const trimmed=name.trim();"
-        "if(!trimmed){return;}"
-        "const option=document.createElement('option');"
-        "option.value=trimmed;"
-        "option.textContent=trimmed;"
-        "if(!matched && preferred && trimmed===preferred){"
-        "option.selected=true;"
-        "matched=true;"
-        "}"
-        "select.append(option);"
-        "});"
-        "if(!matched){"
-        "select.value='';"
-        "}"
-        "select.disabled=false;"
-        "};"
-        "const loadDevices=async()=>{"
-        "if(!select){return;}"
-        "try{"
-        f"const response=await fetch({devices_endpoint});"
-        "if(!response.ok){throw new Error('Request failed');}"
-        "const payload=await response.json();"
-        "const devices=Array.isArray(payload.devices)?payload.devices:[];"
-        "if(devices.length===0){"
-        "setSingleOption('No devices found');"
-        "return;"
-        "}"
-        "enableSelect(devices);"
-        "}catch(error){"
-        "setSingleOption('Unable to load devices');"
-        "}"
-        "};"
-        "loadDevices();"
-        "const pairForm=document.getElementById('youtube-pair-form');"
-        "if(!pairForm){return;}"
-        "const codeInput=document.getElementById('youtube-link-code');"
-        "const pairButton=document.getElementById('youtube-pair-button');"
-        "const errorDialog=document.getElementById('settings-error-dialog');"
-        "const errorMessage=document.getElementById('settings-error-message');"
-        f"const pairEndpoint={pair_endpoint};"
-        "const existingAuth=settings && typeof settings.youtube_app_auth==='string'?settings.youtube_app_auth.trim():'';"
-        "const setButtonState=(label, disabled)=>{"
-        "if(pairButton){"
-        "pairButton.textContent=label;"
-        "pairButton.disabled=!!disabled;"
-        "}"
-        "};"
-        "const showError=(message)=>{"
-        "const fallback=message && typeof message==='string'?message:'Unable to pair with the YouTube app.';"
-        "if(errorDialog && typeof errorDialog.showModal==='function'){"
-        "errorMessage.textContent=fallback;"
-        "try{errorDialog.showModal();}catch(showError){window.alert(fallback);}"
-        "}else{window.alert(fallback);}"
-        "};"
-        "if(existingAuth){"
-        "setButtonState('Paired!', true);"
-        "if(codeInput){codeInput.disabled=true;}"
-        "}"
-        "pairForm.addEventListener('submit', async(event)=>{"
-        "event.preventDefault();"
-        "if(!codeInput || !pairButton){return;}"
-        "const code=codeInput.value.trim();"
-        "if(!code){"
-        "showError('Enter the code displayed on your TV.');"
-        "codeInput.focus();"
-        "return;"
-        "}"
-        "const originalLabel=pairButton.dataset.originalLabel||pairButton.textContent||'Pair';"
-        "pairButton.dataset.originalLabel=originalLabel;"
-        "setButtonState('Pairing...', true);"
-        "try{"
-        "const response=await fetch(pairEndpoint,{"
-        "method:'POST',"
-        "headers:{'Content-Type':'application/json'},"
-        "body:JSON.stringify({code})"
-        "});"
-        "if(!response.ok){"
-        "let detail='Unable to pair with the YouTube app.';"
-        "try{"
-        "const payload=await response.json();"
-        "if(payload && typeof payload.detail==='string'){detail=payload.detail;}"
-        "}catch(ignore){}"
-        "throw new Error(detail);"
-        "}"
-        "setButtonState('Paired!', true);"
-        "if(codeInput){codeInput.disabled=true;}"
-        "}catch(error){"
-        "setButtonState(pairButton.dataset.originalLabel||'Pair', false);"
-        "showError(error && typeof error.message==='string'?error.message:'Unable to pair with the YouTube app.');"
-        "}"
-        "});"
-        "})();</script>"
-        "</section>"
-    )
+) -> dict[str, Any]:
+    return {
+        "devices_url": devices_url,
+        "save_url": save_url,
+        "pair_url": pair_url,
+        "settings": settings or {},
+    }
 
 
 def _pair_and_store(code: str) -> dict[str, Any]:
@@ -504,16 +273,8 @@ def _pair_and_store(code: str) -> dict[str, Any]:
     return payload
 
 
-def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
-    if not playlists:
-        return (
-            "<section>"
-            "<h2>Stored Playlists</h2>"
-            "<p>No playlists have been stored yet.</p>"
-            "</section>"
-        )
-
-    items: list[str] = []
+def _playlists_overview_content(playlists: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     for playlist in playlists:
         playlist_id = playlist.get("id") or ""
         if not playlist_id:
@@ -522,80 +283,43 @@ def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
         title = playlist.get("title") or playlist_id
         vote = _resource_vote(playlist.get("label"))
         encoded_playlist_id = quote(playlist_id, safe="")
-        playlist_link = (
-            f"<a href=\"/configure/playlists/{encoded_playlist_id}\">{html.escape(title)}</a>"
-        )
 
         channel_id = playlist.get("channel_id") or ""
-        channel_title = playlist.get("channel_title") or channel_id or "Unknown channel"
-        if channel_id:
-            encoded_channel_id = quote(channel_id, safe="")
-            channel_display = (
-                f"<a href=\"/configure/channels/{encoded_channel_id}\">"
-                f"{html.escape(channel_title)}"
-                "</a>"
-            )
-        else:
-            channel_display = html.escape(channel_title)
+        channel_title = (
+            playlist.get("channel_title")
+            or channel_id
+            or "Unknown channel"
+        )
+        channel_url = f"/configure/channels/{quote(channel_id, safe='')}" if channel_id else None
 
-        vote_display = f" {vote}" if vote else ""
         items.append(
-            f"<li>[{channel_display}] {playlist_link}{vote_display}</li>"
+            {
+                "title": title,
+                "url": f"/configure/playlists/{encoded_playlist_id}",
+                "vote": vote,
+                "channel": {
+                    "title": channel_title,
+                    "url": channel_url,
+                },
+            }
         )
 
-    if not items:
-        return (
-            "<section>"
-            "<h2>Stored Playlists</h2>"
-            "<p>No playlists have been stored yet.</p>"
-            "</section>"
-        )
-
-    items_html = "".join(items)
-    return (
-        "<section>"
-        "<h2>Stored Playlists</h2>"
-        "<ol>"
-        f"{items_html}"
-        "</ol>"
-        "</section>"
-    )
+    return items
 
 
 def _channel_resource_content(
     channel: dict | None,
     sections: list[dict],
     playlist_map: dict[str, dict] | None = None,
-) -> str:
+) -> dict[str, Any]:
     if not channel:
-        return (
-            "<section>"
-            "<h2>Channel Not Found</h2>"
-            "<p>No stored data is available for this channel. Submit the identifier "
-            "through the form to fetch it from YouTube.</p>"
-            "</section>"
-        )
+        return {"channel": None}
 
     channel_identifier = channel.get("id") or ""
-    channel_id = html.escape(channel_identifier)
-    encoded_channel_id = quote(channel_identifier, safe="")
-    title = html.escape(channel.get("title") or "Untitled channel")
-    description = html.escape(channel.get("description") or "")
-    retrieved_at = html.escape(channel.get("retrieved_at") or "Unknown")
-    label = channel.get("label")
-    if label == "whitelisted":
-        vote = "👍"
-    elif label == "blacklisted":
-        vote = "👎"
-    else:
-        vote = ""
-
-    description_html = (
-        f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
-    )
-
+    encoded_channel_id = quote(channel_identifier, safe="") if channel_identifier else ""
     playlist_map = playlist_map or {}
-    section_items: list[str] = []
+
+    section_entries: list[dict[str, str | None]] = []
     for section in sections or []:
         raw = section.get("raw_json") if isinstance(section, dict) else None
         if isinstance(raw, str):
@@ -624,16 +348,16 @@ def _channel_resource_content(
 
         if len(playlist_ids) == 1:
             playlist_id = playlist_ids[0]
-            playlist_record = playlist_map.get(playlist_id)
+            playlist_record = playlist_map.get(playlist_id) or {}
             playlist_title = (
                 playlist_record.get("title") if isinstance(playlist_record, dict) else None
             )
             display_text = playlist_title or playlist_id
-            encoded_playlist_id = quote(playlist_id, safe="")
-            display_html = (
-                f"<a href=\"/configure/playlists/{encoded_playlist_id}\">"
-                f"{html.escape(display_text)}"
-                "</a>"
+            section_entries.append(
+                {
+                    "title": display_text,
+                    "url": f"/configure/playlists/{quote(playlist_id, safe='')}",
+                }
             )
         else:
             title_text = section.get("title") if isinstance(section, dict) else None
@@ -643,53 +367,22 @@ def _channel_resource_content(
                     title_text = snippet.get("title")
             if not title_text and isinstance(section, dict):
                 title_text = section.get("id")
-            title_text = title_text or "Untitled"
-            display_html = html.escape(title_text)
+            section_entries.append({"title": title_text or "Untitled", "url": None})
 
-        section_items.append(f"<li>{display_html}</li>")
-
-    if section_items:
-        sections_html = (
-            "<h3>Channel Sections</h3>"
-            "<ol>"
-            f"{''.join(section_items)}"
-            "</ol>"
-        )
-    else:
-        sections_html = (
-            "<h3>Channel Sections</h3>"
-            "<p><em>No channel sections stored.</em></p>"
-        )
-
-    vote_display = f" {vote}" if vote else ""
-    info_link = (
-        ""
-        if not encoded_channel_id
-        else (
-            " <a class=\"resource-info-link\" "
-            "href=\"/configure/channels/"
-            f"{encoded_channel_id}/raw\" "
-            "title=\"View raw YouTube data\" "
-            "aria-label=\"View raw YouTube data\">🛈</a>"
-        )
-    )
-
-    heading = (
-        "<h2 class=\"resource-title\">"
-        f"<span class=\"resource-title-text\">{title}{vote_display}</span>"
-        f"{info_link}"
-        "</h2>"
-    )
-
-    return (
-        "<section>"
-        f"{heading}"
-        f"<p><small>ID: {channel_id}</small></p>"
-        f"{description_html}"
-        f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
-        f"{sections_html}"
-        "</section>"
-    )
+    return {
+        "channel": {
+            "id": channel_identifier,
+            "title": channel.get("title") or "Untitled channel",
+            "description": channel.get("description") or "",
+            "retrieved_at": channel.get("retrieved_at") or "Unknown",
+            "label": channel.get("label"),
+            "vote": _resource_vote(channel.get("label")),
+            "info_url": (
+                f"/configure/channels/{encoded_channel_id}/raw" if encoded_channel_id else None
+            ),
+            "sections": section_entries,
+        }
+    }
 
 
 def _playlist_resource_content(
@@ -697,62 +390,45 @@ def _playlist_resource_content(
     playlist_items: list[dict[str, Any]],
     list_choice: str | None,
     playlist: dict | None,
-) -> str:
-    escaped_id = html.escape(playlist_id)
-    encoded_playlist_id = quote(str(playlist_id), safe="")
+) -> dict[str, Any]:
+    playlist_id_str = str(playlist_id)
+    encoded_playlist_id = quote(playlist_id_str, safe="")
+    list_label = LIST_LABELS.get(list_choice)
+
+    playlist_context: dict[str, Any] = {
+        "id": playlist_id_str,
+        "list_label": list_label,
+        "items": [],
+        "info_url": (
+            f"/configure/playlists/{encoded_playlist_id}/raw" if playlist else None
+        ),
+    }
+
     if playlist:
-        title = html.escape(playlist.get("title") or playlist_id)
+        playlist_context["title"] = playlist.get("title") or playlist_id_str
         raw_data = playlist.get("raw_json") if isinstance(playlist, dict) else None
+        if isinstance(raw_data, str):
+            try:
+                raw_data = json.loads(raw_data)
+            except json.JSONDecodeError:  # pragma: no cover - defensive
+                raw_data = None
+        if not raw_data and isinstance(playlist, dict):
+            raw_data = playlist
         snippet = raw_data.get("snippet") if isinstance(raw_data, dict) else {}
         channel_id = snippet.get("channelId") if isinstance(snippet, dict) else None
         channel_title = snippet.get("channelTitle") if isinstance(snippet, dict) else None
-        channel_line = ""
         if channel_id or channel_title:
-            channel_title_text = html.escape(channel_title or channel_id or "")
-            if channel_id:
-                encoded_channel_id = quote(channel_id, safe="")
-                channel_display = (
-                    f"<a href=\"/configure/channels/{encoded_channel_id}\">{channel_title_text}</a>"
-                )
-            else:
-                channel_display = channel_title_text
-            channel_line = f"<p>{channel_display}</p>"
-        info_link = (
-            ""
-            if not encoded_playlist_id
-            else (
-                " <a class=\"resource-info-link\" "
-                "href=\"/configure/playlists/"
-                f"{encoded_playlist_id}/raw\" "
-                "title=\"View raw YouTube data\" "
-                "aria-label=\"View raw YouTube data\">🛈</a>"
-            )
-        )
-        heading = (
-            "<h2 class=\"resource-title\">"
-            f"<span class=\"resource-title-text\">{title}</span>"
-            f"{info_link}"
-            "</h2>"
-            f"{channel_line}"
-            f"<p><small>ID: {escaped_id}</small></p>"
-        )
+            playlist_context["channel"] = {
+                "title": channel_title or channel_id or "",
+                "url": (
+                    f"/configure/channels/{quote(channel_id, safe='')}"
+                    if channel_id
+                    else None
+                ),
+            }
     else:
-        heading = f"<h2>Playlist <code>{escaped_id}</code></h2>"
-    list_summary = (
-        f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
-        if list_choice in LIST_LABELS
-        else ""
-    )
-    if not playlist_items:
-        return (
-            "<section>"
-            f"{heading}"
-            f"{list_summary}"
-            "<p>No stored playlist items for this playlist.</p>"
-            "</section>"
-        )
+        playlist_context["title"] = None
 
-    titles = []
     for item in playlist_items:
         snippet = item.get("snippet") or {}
         title = snippet.get("title") or "Untitled item"
@@ -768,23 +444,25 @@ def _playlist_resource_content(
             if isinstance(content_details, dict):
                 video_id = content_details.get("videoId")
 
-        title_text = html.escape(title)
         if video_id:
             encoded_video_id = quote(str(video_id), safe="")
-            title_text = (
-                f"<a href=\"/configure/videos/{encoded_video_id}\">{title_text}</a>"
+            playlist_context["items"].append(
+                {
+                    "title": title,
+                    "video_id": str(video_id),
+                    "video_url": f"/configure/videos/{encoded_video_id}",
+                }
+            )
+        else:
+            playlist_context["items"].append(
+                {
+                    "title": title,
+                    "video_id": None,
+                    "video_url": None,
+                }
             )
 
-        titles.append(f"<li>{title_text}</li>")
-    items_html = "".join(titles)
-    return (
-        "<section>"
-        f"{heading}"
-        f"{list_summary}"
-        "<p>Stored playlist item titles:</p>"
-        f"<ol>{items_html}</ol>"
-        "</section>"
-    )
+    return {"playlist": playlist_context}
 
 
 def _build_resource_reference_map(
@@ -839,150 +517,76 @@ def _build_resource_reference_map(
     return results
 
 
-def _format_listed_line(
-    prefix: str,
-    identifiers: list[str],
-    reference_map: dict[str, dict[str, str]],
-) -> str:
-    items: list[str] = []
-    for identifier in identifiers:
-        if not isinstance(identifier, str):
-            continue
-        normalized = identifier.strip()
-        if not normalized:
-            continue
-        info = reference_map.get(normalized)
-        if info:
-            title_text = html.escape(info.get("title") or normalized)
-            url = info.get("url") or f"/configure/videos/{quote(normalized, safe='')}"
-        else:
-            title_text = html.escape(normalized)
-            url = f"/configure/videos/{quote(normalized, safe='')}"
-        escaped_url = html.escape(url, quote=True)
-        items.append(f"<a href=\"{escaped_url}\">{title_text}</a>")
-
-    if not items:
-        return ""
-
-    joined = ", ".join(items)
-    return f"<p class=\"resource-vote-line\">{prefix} {joined}</p>"
+def _build_list_entry(identifier: str, reference_map: dict[str, dict[str, str]]) -> dict[str, str]:
+    info = reference_map.get(identifier)
+    if info:
+        title = info.get("title") or identifier
+        url = info.get("url") or f"/configure/videos/{quote(identifier, safe='')}"
+    else:
+        title = identifier
+        url = f"/configure/videos/{quote(identifier, safe='')}"
+    return {"title": title, "url": url}
 
 
-def _format_listed_lines(
+def _build_listed_groups(
     listed_video: dict[str, Any] | None,
     reference_map: dict[str, dict[str, str]] | None,
-) -> str:
+) -> list[dict[str, Any]]:
     if not listed_video:
-        return ""
+        return []
 
     effective_map = reference_map or {}
-    lines: list[str] = []
+    groups: list[dict[str, Any]] = []
     for key, icon in (("whitelisted_by", "👍"), ("blacklisted_by", "👎")):
         identifiers = listed_video.get(key)
-        if isinstance(identifiers, list):
-            line_html = _format_listed_line(icon, identifiers, effective_map)
-            if line_html:
-                lines.append(line_html)
-    return "".join(lines)
+        if not isinstance(identifiers, list):
+            continue
+        entries: list[dict[str, str]] = []
+        for identifier in identifiers:
+            if not isinstance(identifier, str):
+                continue
+            normalized = identifier.strip()
+            if not normalized:
+                continue
+            entries.append(_build_list_entry(normalized, effective_map))
+        if entries:
+            groups.append({"icon": icon, "entries": entries})
+    return groups
 
 
 def _video_resource_content(
     video: dict | None,
     listed_video: dict[str, Any] | None = None,
     reference_map: dict[str, dict[str, str]] | None = None,
-) -> str:
+) -> dict[str, Any]:
     if not video:
-        return (
-            "<section>"
-            "<h2>Video Not Found</h2>"
-            "<p>No stored data is available for this video. Submit the identifier "
-            "through the form to fetch it from YouTube.</p>"
-            "</section>"
-        )
+        return {"video": None}
 
     video_identifier = video.get("id") or ""
-    video_id = html.escape(video_identifier)
-    encoded_video_id = quote(video_identifier, safe="")
-    title = html.escape(video.get("title") or "Untitled video")
-    description = html.escape(video.get("description") or "")
-    retrieved_at = html.escape(video.get("retrieved_at") or "Unknown")
-    label = video.get("label")
-    if label == "whitelisted":
-        vote = "👍"
-    elif label == "blacklisted":
-        vote = "👎"
-    else:
-        vote = ""
+    encoded_video_id = quote(video_identifier, safe="") if video_identifier else ""
 
-    description_html = (
-        f"<p>{description}</p>" if description else "<p><em>No description provided.</em></p>"
-    )
-
-    vote_display = f" {vote}" if vote else ""
-    info_link = (
-        ""
-        if not encoded_video_id
-        else (
-            " <a class=\"resource-info-link\" "
-            "href=\"/configure/videos/"
-            f"{encoded_video_id}/raw\" "
-            "title=\"View raw YouTube data\" "
-            "aria-label=\"View raw YouTube data\">🛈</a>"
-        )
-    )
-    heading = (
-        "<h2 class=\"resource-title\">"
-        f"<span class=\"resource-title-text\">{title}{vote_display}</span>"
-        f"{info_link}"
-        "</h2>"
-    )
-
-    listed_lines_html = _format_listed_lines(listed_video, reference_map)
-
-    return (
-        "<section>"
-        f"{heading}"
-        f"<p><small>ID: {video_id}</small></p>"
-        f"{listed_lines_html}"
-        f"{description_html}"
-        f"<p><strong>Retrieved:</strong> {retrieved_at}</p>"
-        "</section>"
-    )
+    return {
+        "video": {
+            "id": video_identifier,
+            "title": video.get("title") or "Untitled video",
+            "description": video.get("description") or "",
+            "retrieved_at": video.get("retrieved_at") or "Unknown",
+            "label": video.get("label"),
+            "vote": _resource_vote(video.get("label")),
+            "info_url": (
+                f"/configure/videos/{encoded_video_id}/raw" if encoded_video_id else None
+            ),
+            "listed_groups": _build_listed_groups(listed_video, reference_map),
+        }
+    }
 
 
-def _api_response_content(
-    resource_id: str,
-    list_choice: str,
-    request_url: str,
-    response_data: dict[str, Any],
-) -> str:
-    escaped_id = html.escape(resource_id)
-    json_payload = html.escape(json.dumps(response_data, indent=2, sort_keys=True))
-    list_summary = (
-        f"<p><strong>List preference:</strong> {html.escape(LIST_LABELS[list_choice])}</p>"
-        if list_choice in LIST_LABELS
-        else ""
-    )
-    return (
-        "<section>"
-        f"<h2>YouTube API response for <code>{escaped_id}</code></h2>"
-        f"{list_summary}"
-        f"<p><strong>Endpoint:</strong> {html.escape(request_url)}</p>"
-        f"<pre class=\"api-response\"><code>{json_payload}</code></pre>"
-        "</section>"
-    )
-
-
-def _raw_payload_content(resource_label: str, resource_id: str, payload: Any) -> str:
-    escaped_id = html.escape(resource_id)
-    formatted_json = html.escape(json.dumps(payload, indent=2, sort_keys=True))
-    return (
-        "<section>"
-        f"<h2>{resource_label} API response</h2>"
-        f"<p><small>ID: {escaped_id}</small></p>"
-        f"<pre class=\"raw-json\"><code>{formatted_json}</code></pre>"
-        "</section>"
-    )
+def _raw_payload_content(resource_label: str, resource_id: str, payload: Any) -> dict[str, Any]:
+    return {
+        "resource_label": resource_label,
+        "resource_id": resource_id,
+        "payload_json": json.dumps(payload, indent=2, sort_keys=True),
+    }
 
 
 def _select_thumbnail_url(raw_video: Any, desired_width: int = 320) -> str | None:
@@ -1153,20 +757,12 @@ def create_app() -> FastAPI:
 
     @app.get("/configure", response_class=HTMLResponse)
     async def configure_home(request: Request) -> HTMLResponse:
-        content = (
-            "<section>"
-            "<h2>Welcome to the configuration workspace</h2>"
-            "<p>Use the menu above to manage channels, playlists, or videos."
-            " Enter a YouTube identifier and choose whether it belongs to the whitelist"
-            " or blacklist to preview how the resource will appear.</p>"
-            "</section>"
-        )
         return _render_config_page(
             request,
             app,
             heading="Configure MyTube",
             active_section=None,
-            content=content,
+            template_name="configure/index.html",
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["channels"]),
         )
 
@@ -1177,14 +773,15 @@ def create_app() -> FastAPI:
     )
     async def configure_channels(request: Request) -> HTMLResponse:
         channels = await run_in_threadpool(fetch_all_channels)
-        content = _channels_overview_content(channels)
+        channel_items = _channels_overview_content(channels)
         heading = f"Manage {RESOURCE_LABELS['channels']}"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="channels",
-            content=content,
+            template_name="configure/channels_overview.html",
+            context={"channels": channel_items},
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["channels"]),
         )
 
@@ -1195,14 +792,15 @@ def create_app() -> FastAPI:
     )
     async def configure_playlists(request: Request) -> HTMLResponse:
         playlists = await run_in_threadpool(fetch_all_playlists)
-        content = _playlists_overview_content(playlists)
+        playlist_items = _playlists_overview_content(playlists)
         heading = f"Manage {RESOURCE_LABELS['playlists']}"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="playlists",
-            content=content,
+            template_name="configure/playlists_overview.html",
+            context={"playlists": playlist_items},
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["playlists"]),
         )
 
@@ -1213,14 +811,15 @@ def create_app() -> FastAPI:
     )
     async def configure_videos(request: Request) -> HTMLResponse:
         videos = await run_in_threadpool(fetch_all_videos)
-        content = _videos_overview_content(videos)
+        video_items = _videos_overview_content(videos)
         heading = f"Manage {RESOURCE_LABELS['videos']}"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="videos",
-            content=content,
+            template_name="configure/videos_overview.html",
+            context={"videos": video_items},
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["videos"]),
         )
 
@@ -1234,14 +833,15 @@ def create_app() -> FastAPI:
         regenerate_url = app.url_path_for(
             "regenerate_listed_videos", list_slug="whitelist"
         )
-        content = _listed_videos_content("whitelist", videos, regenerate_url)
+        list_context = _listed_videos_content("whitelist", videos, regenerate_url)
         heading = f"{LIST_PAGE_LABELS['whitelist']} Videos"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="whitelist",
-            content=content,
+            template_name="configure/listed_videos.html",
+            context=list_context,
             show_resource_form=False,
         )
 
@@ -1255,14 +855,15 @@ def create_app() -> FastAPI:
         regenerate_url = app.url_path_for(
             "regenerate_listed_videos", list_slug="blacklist"
         )
-        content = _listed_videos_content("blacklist", videos, regenerate_url)
+        list_context = _listed_videos_content("blacklist", videos, regenerate_url)
         heading = f"{LIST_PAGE_LABELS['blacklist']} Videos"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="blacklist",
-            content=content,
+            template_name="configure/listed_videos.html",
+            context=list_context,
             show_resource_form=False,
         )
 
@@ -1278,13 +879,14 @@ def create_app() -> FastAPI:
         )
         save_url = app.url_path_for("save_settings")
         pair_url = app.url_path_for("pair_youtube_app")
-        content = _settings_content(devices_url, settings, save_url, pair_url)
+        settings_context = _settings_content(devices_url, settings, save_url, pair_url)
         return _render_config_page(
             request,
             app,
             heading="Application Settings",
             active_section="settings",
-            content=content,
+            template_name="configure/settings.html",
+            context=settings_context,
             show_resource_form=False,
         )
 
@@ -1565,13 +1167,14 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Channel raw data is unavailable"
             )
-        content = _raw_payload_content("Channel", resource_id, raw_payload)
+        payload_context = _raw_payload_content("Channel", resource_id, raw_payload)
         return _render_config_page(
             request,
             app,
             heading="Channel raw data",
             active_section="channels",
-            content=content,
+            template_name="configure/raw_payload.html",
+            context=payload_context,
             show_resource_form=False,
         )
 
@@ -1589,13 +1192,14 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Playlist raw data is unavailable"
             )
-        content = _raw_payload_content("Playlist", resource_id, raw_payload)
+        payload_context = _raw_payload_content("Playlist", resource_id, raw_payload)
         return _render_config_page(
             request,
             app,
             heading="Playlist raw data",
             active_section="playlists",
-            content=content,
+            template_name="configure/raw_payload.html",
+            context=payload_context,
             show_resource_form=False,
         )
 
@@ -1613,13 +1217,14 @@ def create_app() -> FastAPI:
             raise HTTPException(
                 status_code=404, detail="Video raw data is unavailable"
             )
-        content = _raw_payload_content("Video", resource_id, raw_payload)
+        payload_context = _raw_payload_content("Video", resource_id, raw_payload)
         return _render_config_page(
             request,
             app,
             heading="Video raw data",
             active_section="videos",
-            content=content,
+            template_name="configure/raw_payload.html",
+            context=payload_context,
             show_resource_form=False,
         )
 
@@ -1635,14 +1240,17 @@ def create_app() -> FastAPI:
         list_choice: str | None = Query(None, alias="list"),
     ) -> HTMLResponse:
         normalized_section = _validate_section(section)
+        template_name: str
+        resource_context: dict[str, Any]
         if normalized_section == "playlists":
             playlist_items = await run_in_threadpool(
                 fetch_playlist_items, resource_id
             )
             playlist = await run_in_threadpool(fetch_playlist, resource_id)
-            content = _playlist_resource_content(
+            resource_context = _playlist_resource_content(
                 resource_id, playlist_items, list_choice, playlist
             )
+            template_name = "configure/playlist_resource.html"
         elif normalized_section == "channels":
             channel = await run_in_threadpool(fetch_channel, resource_id)
             channel_sections = await run_in_threadpool(
@@ -1683,7 +1291,10 @@ def create_app() -> FastAPI:
                     return playlist_map
 
                 playlist_map = await run_in_threadpool(_fetch_section_playlists)
-            content = _channel_resource_content(channel, channel_sections, playlist_map)
+            resource_context = _channel_resource_content(
+                channel, channel_sections, playlist_map
+            )
+            template_name = "configure/channel_resource.html"
         elif normalized_section == "videos":
             video = await run_in_threadpool(fetch_video, resource_id)
             listed_video = await run_in_threadpool(
@@ -1708,9 +1319,10 @@ def create_app() -> FastAPI:
                         _build_resource_reference_map, identifiers
                     )
 
-            content = _video_resource_content(
+            resource_context = _video_resource_content(
                 video, listed_video, reference_map
             )
+            template_name = "configure/video_resource.html"
         else:  # pragma: no cover - defensive
             raise HTTPException(status_code=500, detail="Unsupported configuration section")
         heading = f"{RESOURCE_LABELS[normalized_section]} Resource"
@@ -1719,7 +1331,8 @@ def create_app() -> FastAPI:
             app,
             heading=heading,
             active_section=normalized_section,
-            content=content,
+            template_name=template_name,
+            context=resource_context,
             form_action=app.url_path_for(CREATE_ROUTE_NAMES[normalized_section]),
             resource_value=resource_id,
         )

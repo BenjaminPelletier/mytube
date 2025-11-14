@@ -23,7 +23,7 @@
       {% endif %}
     </header>
     <main class="configure-content">
-      {{ content_html | safe }}
+      {% block content %}{% endblock %}
     </main>
   </body>
 </html>

@@ -1,0 +1,18 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section>
+  <h2>Stored Channels</h2>
+  {% if channels %}
+  <ol>
+    {% for channel in channels %}
+    <li>
+      <a href="{{ channel.url }}">{{ channel.title }}</a>{% if channel.vote %} {{ channel.vote }}{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No channels have been stored yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
