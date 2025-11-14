@@ -1,7 +1,8 @@
 body {
   font-family: system-ui, sans-serif;
-  margin: 2rem;
-  max-width: 40rem;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  max-width: 72rem;
 }
 
 h1 {
@@ -45,15 +46,18 @@ p.description {
 .video-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  column-gap: clamp(0rem, calc((100% - 640px) / 3), 1rem);
+  row-gap: 1.5rem;
   margin: 0 0 1.5rem;
   padding: 0;
   list-style: none;
 }
 
 .video-option {
-  display: inline-block;
-  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 320px;
+  max-width: 320px;
   text-decoration: none;
   color: inherit;
 }
