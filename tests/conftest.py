@@ -134,6 +134,24 @@ def _install_fastapi_stubs() -> None:
         sys.modules["pychromecast.controllers"] = controllers_module
         sys.modules["pychromecast.controllers.youtube"] = youtube_module
 
+    if "pyytlounge" not in sys.modules:
+        pyytlounge_module = types.ModuleType("pyytlounge")
+
+        class _PairingClient:  # pragma: no cover - stub
+            def pair_link_code(self, code: str):
+                return {"paired": code}
+
+        pairing_module = types.ModuleType("pyytlounge.pairing")
+        pairing_module.PairingClient = _PairingClient
+
+        def _pair_link_code(code: str):  # pragma: no cover - stub
+            return {"paired": code}
+
+        pairing_module.pair_link_code = _pair_link_code
+        pyytlounge_module.pairing = pairing_module
+        sys.modules["pyytlounge"] = pyytlounge_module
+        sys.modules["pyytlounge.pairing"] = pairing_module
+
 
 _install_fastapi_stubs()
 
