@@ -5,62 +5,34 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pyytlounge import YtLoungeApi
+from pyytlounge.wrapper import YtLoungeApi
 
-__all__ = ["PairingError", "pair_with_link_code"]
-
-
-logger = logging.getLogger(__name__)
+__all__ = ["PairingError", "pair_with_link_code", "dumps_auth_payload"]
 
 
 class PairingError(RuntimeError):
     """Raised when pairing with the YouTube app fails."""
 
 
-_PAIRING_CALLABLE_NAMES = (
-    "pair_link_code",
-    "pair_code",
-    "pair",
-    "pair_with_code",
-)
-
-
 def pair_with_link_code(link_code: str) -> dict[str, Any]:
-    """Pair with the YouTube TV app using a "Link with TV" code.
-
-    Parameters
-    ----------
-    link_code:
-        The code displayed by the YouTube application on a TV device. Hyphens,
-        spaces, and other separator characters are ignored.
-
-    Returns
-    -------
-    dict
-        A mapping of authentication data returned by :mod:`pyytlounge`.
-
-    Raises
-    ------
-    PairingError
-        If the supplied code is invalid or the pairing library rejects it.
-    """
+    """Pair with the YouTube TV app using a "Link with TV" code."""
 
     normalized_code = _normalize_code(link_code)
     if not normalized_code:
         raise PairingError("Enter the full Link with TV code from your TV.")
 
-    async def pair() -> Any:
-        async with YtLoungeApi("My Remote") as api:
-            paired_and_linked = await api.pair(normalized_code)  # pairs + links (gets lounge token)
-            if not paired_and_linked:
-                raise PairingError(f"YtLoungApi `pair` method failed with {normalized_code}")
-            return api.store_auth_state()  # serialize dict for reuse
+    async def _pair() -> Any:
+        async with YtLoungeApi("MyTube Remote") as api:
+            paired = await api.pair(normalized_code)
+            if not paired:
+                raise PairingError("Unable to pair with the YouTube app.")
+            payload = api.store_auth_state()
+            return _normalize_auth_payload(payload)
 
-    return _normalize_auth_payload(asyncio.run(pair()))
+    return asyncio.run(_pair())
 
 
 def _normalize_code(link_code: str) -> str:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 pytest.importorskip("sqlalchemy")
@@ -16,35 +18,26 @@ def test_settings_content_includes_device_loader_and_pairing_ui() -> None:
         {"youtube_app_auth": "stored"},
         "/save",
         "/pair",
+        {"connected": True},
     )
 
-    assert "Loading devices..." in content
-    assert "preferred-device" in content
-    assert 'fetch("/devices")' in content
-    assert "youtube-link-code" in content
-    assert 'const pairEndpoint="/pair"' in content
-    assert "settings-error-dialog" in content
-    assert "Pairing..." in content
+    assert content["devices_url"] == "/devices"
+    assert content["save_url"] == "/save"
+    assert content["pair_url"] == "/pair"
+    assert content["settings"]["youtube_app_auth"] == "stored"
+    assert content["lounge_status"] == {"connected": True}
 
 
 def test_settings_navigation_entry_available() -> None:
     assert ("settings", "Settings") in web.CONFIG_NAVIGATION  # type: ignore[attr-defined]
 
 
-def test_pair_and_store_persists_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    stored: dict[str, str] = {}
+def test_load_lounge_auth_handles_serialized_payload() -> None:
+    payload = {"screenId": "screen-1", "lounge_id_token": "abc", "refresh_token": "xyz"}
+    serialized = json.dumps(payload)
 
-    def fake_pair(code: str) -> dict[str, str]:
-        assert code == "ABCD"
-        return {"token": "abcd"}
+    result = web._load_lounge_auth({"youtube_app_auth": serialized})  # type: ignore[attr-defined]
 
-    def fake_store(values: dict[str, str]) -> None:
-        stored.update(values)
-
-    monkeypatch.setattr(web, "pair_with_link_code", fake_pair)  # type: ignore[attr-defined]
-    monkeypatch.setattr(web, "store_settings", fake_store)  # type: ignore[attr-defined]
-
-    result = web._pair_and_store("ABCD")  # type: ignore[attr-defined]
-
-    assert result == {"token": "abcd"}
-    assert stored["youtube_app_auth"] == '{"token":"abcd"}'
+    assert result is not None
+    assert result["screenId"] == "screen-1"
+    assert result["loungeIdToken"] == "abc"

@@ -293,6 +293,31 @@ h1 {
   border-color: #7fb0ff;
 }
 
+.pair-status-container {
+  margin: 0 0 1.5rem;
+}
+
+.pair-status {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pair-status + .pair-status {
+  margin-top: 0.5rem;
+}
+
+.pair-status--ok {
+  color: #1b873f;
+}
+
+.pair-status--error {
+  color: #b11226;
+}
+
+.pair-status--unknown {
+  color: #555;
+}
+
 .settings-modal::backdrop {
   background: rgba(15, 23, 42, 0.35);
 }
