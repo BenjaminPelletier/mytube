@@ -90,6 +90,16 @@ def control_youtube_playback(action: str, *, device_name: str | None = None) -> 
         if controller is None:
             raise ChromecastUnavailableError("Chromecast media controller is unavailable.")
 
+        if hasattr(controller, "update_status"):
+            controller.update_status()
+
+        if hasattr(controller, "block_until_active"):
+            is_active = controller.block_until_active(timeout=5)
+            if not is_active:
+                raise ChromecastUnavailableError(
+                    "Chromecast has no active media session to control."
+                )
+
         control_method = getattr(controller, method_name, None)
         if control_method is None:
             raise ChromecastUnavailableError(
