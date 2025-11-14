@@ -241,3 +241,89 @@ h1 {
   color: #57606a;
   font-size: 0.9rem;
 }
+
+.pair-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  max-width: 28rem;
+}
+
+.pair-label {
+  font-weight: 600;
+}
+
+.pair-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.pair-input {
+  flex: 1 1 14rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d0d7de;
+  font-size: 1rem;
+}
+
+.pair-button {
+  padding: 0.55rem 1.15rem;
+  border-radius: 0.5rem;
+  border: 1px solid #1f6feb;
+  background: #1f6feb;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.pair-button:hover,
+.pair-button:focus-visible {
+  background: #1158c7;
+  border-color: #1158c7;
+}
+
+.pair-button:disabled {
+  cursor: default;
+  background: #7fb0ff;
+  border-color: #7fb0ff;
+}
+
+.settings-modal::backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.settings-modal {
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0;
+  max-width: 24rem;
+  width: min(90vw, 24rem);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.25);
+}
+
+.settings-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.settings-modal-close {
+  align-self: flex-end;
+  padding: 0.45rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-modal-close:hover,
+.settings-modal-close:focus-visible {
+  background: #e9eef5;
+}

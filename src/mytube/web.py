@@ -45,6 +45,7 @@ from .db import (
     store_settings,
     set_resource_label,
 )
+from .ytlounge import PairingError, dumps_auth_payload, pair_with_link_code
 from .youtube import (
     fetch_youtube_channel_sections,
     fetch_youtube_channels,
@@ -329,9 +330,13 @@ def _listed_videos_content(
 
 
 def _settings_content(
-    devices_url: str, settings: dict[str, str], save_url: str
+    devices_url: str,
+    settings: dict[str, str],
+    save_url: str,
+    pair_url: str,
 ) -> str:
     devices_endpoint = json.dumps(devices_url)
+    pair_endpoint = json.dumps(pair_url)
     settings_json = json.dumps(settings or {})
     escaped_save_url = html.escape(save_url, quote=True)
     return (
@@ -349,13 +354,32 @@ def _settings_content(
         "<button type=\"submit\" class=\"settings-save-button\">Save Settings</button>"
         "</div>"
         "</form>"
+        "</section>"
+        "<section class=\"settings-section\">"
+        "<h2>YouTube App Pairing</h2>"
+        "<p>Link MyTube with the YouTube app to cast directly from your TV.</p>"
+        "<form id=\"youtube-pair-form\" class=\"pair-form\" novalidate>"
+        "<label class=\"pair-label\" for=\"youtube-link-code\">Link with TV code</label>"
+        "<div class=\"pair-fields\">"
+        "<input id=\"youtube-link-code\" name=\"link_code\" class=\"pair-input\" type=\"text\" autocomplete=\"off\" placeholder=\"XXX XXX XXX XXX\" required>"
+        "<button type=\"submit\" id=\"youtube-pair-button\" class=\"pair-button\">Pair</button>"
+        "</div>"
+        "<p class=\"settings-help\">Find the code in the YouTube app under Settings → Link with TV code.</p>"
+        "</form>"
+        "<dialog id=\"settings-error-dialog\" class=\"settings-modal\" aria-labelledby=\"settings-error-title\">"
+        "<form method=\"dialog\" class=\"settings-modal-content\">"
+        "<h3 id=\"settings-error-title\">Pairing error</h3>"
+        "<p id=\"settings-error-message\"></p>"
+        "<button type=\"submit\" value=\"close\" class=\"settings-modal-close\">Close</button>"
+        "</form>"
+        "</dialog>"
         "<script>(function(){"
         "const select=document.getElementById('preferred-device');"
-        "if(!select){return;}"
         f"const settings={settings_json};"
         "const preferredRaw=settings && typeof settings.preferred_device==='string'?settings.preferred_device:'';"
         "const preferred=preferredRaw.trim();"
         "const setSingleOption=(label)=>{"
+        "if(!select){return;}"
         "select.innerHTML='';"
         "const option=document.createElement('option');"
         "option.textContent=label;"
@@ -366,6 +390,7 @@ def _settings_content(
         "select.disabled=true;"
         "};"
         "const enableSelect=(devices)=>{"
+        "if(!select){return;}"
         "select.innerHTML='';"
         "const noneOption=document.createElement('option');"
         "noneOption.textContent='No preferred device';"
@@ -391,6 +416,7 @@ def _settings_content(
         "select.disabled=false;"
         "};"
         "const loadDevices=async()=>{"
+        "if(!select){return;}"
         "try{"
         f"const response=await fetch({devices_endpoint});"
         "if(!response.ok){throw new Error('Request failed');}"
@@ -406,9 +432,76 @@ def _settings_content(
         "}"
         "};"
         "loadDevices();"
+        "const pairForm=document.getElementById('youtube-pair-form');"
+        "if(!pairForm){return;}"
+        "const codeInput=document.getElementById('youtube-link-code');"
+        "const pairButton=document.getElementById('youtube-pair-button');"
+        "const errorDialog=document.getElementById('settings-error-dialog');"
+        "const errorMessage=document.getElementById('settings-error-message');"
+        f"const pairEndpoint={pair_endpoint};"
+        "const existingAuth=settings && typeof settings.youtube_app_auth==='string'?settings.youtube_app_auth.trim():'';"
+        "const setButtonState=(label, disabled)=>{"
+        "if(pairButton){"
+        "pairButton.textContent=label;"
+        "pairButton.disabled=!!disabled;"
+        "}"
+        "};"
+        "const showError=(message)=>{"
+        "const fallback=message && typeof message==='string'?message:'Unable to pair with the YouTube app.';"
+        "if(errorDialog && typeof errorDialog.showModal==='function'){"
+        "errorMessage.textContent=fallback;"
+        "try{errorDialog.showModal();}catch(showError){window.alert(fallback);}"
+        "}else{window.alert(fallback);}"
+        "};"
+        "if(existingAuth){"
+        "setButtonState('Paired!', true);"
+        "if(codeInput){codeInput.disabled=true;}"
+        "}"
+        "pairForm.addEventListener('submit', async(event)=>{"
+        "event.preventDefault();"
+        "if(!codeInput || !pairButton){return;}"
+        "const code=codeInput.value.trim();"
+        "if(!code){"
+        "showError('Enter the code displayed on your TV.');"
+        "codeInput.focus();"
+        "return;"
+        "}"
+        "const originalLabel=pairButton.dataset.originalLabel||pairButton.textContent||'Pair';"
+        "pairButton.dataset.originalLabel=originalLabel;"
+        "setButtonState('Pairing...', true);"
+        "try{"
+        "const response=await fetch(pairEndpoint,{"
+        "method:'POST',"
+        "headers:{'Content-Type':'application/json'},"
+        "body:JSON.stringify({code})"
+        "});"
+        "if(!response.ok){"
+        "let detail='Unable to pair with the YouTube app.';"
+        "try{"
+        "const payload=await response.json();"
+        "if(payload && typeof payload.detail==='string'){detail=payload.detail;}"
+        "}catch(ignore){}"
+        "throw new Error(detail);"
+        "}"
+        "setButtonState('Paired!', true);"
+        "if(codeInput){codeInput.disabled=true;}"
+        "}catch(error){"
+        "setButtonState(pairButton.dataset.originalLabel||'Pair', false);"
+        "showError(error && typeof error.message==='string'?error.message:'Unable to pair with the YouTube app.');"
+        "}"
+        "});"
         "})();</script>"
         "</section>"
     )
+
+
+def _pair_and_store(code: str) -> dict[str, Any]:
+    """Pair with the YouTube app and persist the auth payload."""
+
+    payload = pair_with_link_code(code)
+    json_payload = dumps_auth_payload(payload)
+    store_settings({"youtube_app_auth": json_payload})
+    return payload
 
 
 def _playlists_overview_content(playlists: list[dict[str, Any]]) -> str:
@@ -1181,10 +1274,11 @@ def create_app() -> FastAPI:
     async def configure_settings(request: Request) -> HTMLResponse:
         devices_url = app.url_path_for("list_devices")
         settings = await run_in_threadpool(
-            fetch_settings, ["preferred_device"]
+            fetch_settings, ["preferred_device", "youtube_app_auth"]
         )
         save_url = app.url_path_for("save_settings")
-        content = _settings_content(devices_url, settings, save_url)
+        pair_url = app.url_path_for("pair_youtube_app")
+        content = _settings_content(devices_url, settings, save_url, pair_url)
         return _render_config_page(
             request,
             app,
@@ -1213,6 +1307,41 @@ def create_app() -> FastAPI:
         await run_in_threadpool(store_settings, settings_payload)
         redirect_url = app.url_path_for("configure_settings")
         return RedirectResponse(url=redirect_url, status_code=303)
+
+    @app.post(
+        "/configure/settings/pair",
+        name="pair_youtube_app",
+    )
+    async def pair_youtube_app_handler(request: Request) -> dict[str, str]:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=400, detail="Invalid JSON payload.") from exc
+
+        code_value: str | None = None
+        if isinstance(payload, dict):
+            raw_code = payload.get("code")
+            if isinstance(raw_code, str):
+                code_value = raw_code.strip()
+
+        if not code_value:
+            raise HTTPException(
+                status_code=400,
+                detail="Link with TV code is required.",
+            )
+
+        try:
+            await run_in_threadpool(_pair_and_store, code_value)
+        except PairingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Unexpected error while pairing with YouTube app")
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to pair with the YouTube app.",
+            ) from exc
+
+        return {"status": "ok"}
 
     @app.post("/configure/channels", name="create_channel")
     async def create_channel(
