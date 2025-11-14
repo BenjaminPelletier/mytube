@@ -36,11 +36,13 @@ from .db import (
     fetch_video,
     initialize_database,
     repopulate_listed_videos,
+    fetch_settings,
     save_channel,
     save_channel_sections,
     save_playlist,
     save_playlist_items,
     save_video,
+    store_settings,
     set_resource_label,
 )
 from .youtube import (
@@ -326,45 +328,66 @@ def _listed_videos_content(
     )
 
 
-def _settings_content(devices_url: str) -> str:
+def _settings_content(
+    devices_url: str, settings: dict[str, str], save_url: str
+) -> str:
     devices_endpoint = json.dumps(devices_url)
+    settings_json = json.dumps(settings or {})
+    escaped_save_url = html.escape(save_url, quote=True)
     return (
         "<section class=\"settings-section\">"
         "<h2>Playback Settings</h2>"
-        "<p>Choose the Chromecast device MyTube should prioritize when casting."
-        " This selection is currently temporary.</p>"
+        "<p>Choose the Chromecast device MyTube should prioritize when casting.</p>"
+        f"<form class=\"settings-form\" method=\"post\" action=\"{escaped_save_url}\">"
         "<div class=\"settings-group\">"
         "<label class=\"settings-label\" for=\"preferred-device\">Preferred casting device</label>"
-        "<select id=\"preferred-device\" class=\"settings-select\" disabled>"
+        "<select id=\"preferred-device\" name=\"preferred_device\" class=\"settings-select\" disabled>"
         "<option>Loading devices...</option>"
         "</select>"
-        "<p class=\"settings-help\">Device choice will be saved in a future update.</p>"
         "</div>"
+        "<div class=\"settings-actions\">"
+        "<button type=\"submit\" class=\"settings-save-button\">Save Settings</button>"
+        "</div>"
+        "</form>"
         "<script>(function(){"
         "const select=document.getElementById('preferred-device');"
         "if(!select){return;}"
+        f"const settings={settings_json};"
+        "const preferredRaw=settings && typeof settings.preferred_device==='string'?settings.preferred_device:'';"
+        "const preferred=preferredRaw.trim();"
         "const setSingleOption=(label)=>{"
         "select.innerHTML='';"
         "const option=document.createElement('option');"
         "option.textContent=label;"
         "option.value='';"
+        "option.disabled=true;"
+        "option.selected=true;"
         "select.append(option);"
         "select.disabled=true;"
         "};"
         "const enableSelect=(devices)=>{"
         "select.innerHTML='';"
-        "const placeholder=document.createElement('option');"
-        "placeholder.textContent='Select a device';"
-        "placeholder.value='';"
-        "placeholder.disabled=true;"
-        "placeholder.selected=true;"
-        "select.append(placeholder);"
+        "const noneOption=document.createElement('option');"
+        "noneOption.textContent='No preferred device';"
+        "noneOption.value='';"
+        "select.append(noneOption);"
+        "let matched=false;"
         "devices.forEach((name)=>{"
+        "if(typeof name!=='string'){return;}"
+        "const trimmed=name.trim();"
+        "if(!trimmed){return;}"
         "const option=document.createElement('option');"
-        "option.value=name;"
-        "option.textContent=name;"
+        "option.value=trimmed;"
+        "option.textContent=trimmed;"
+        "if(!matched && preferred && trimmed===preferred){"
+        "option.selected=true;"
+        "matched=true;"
+        "}"
         "select.append(option);"
         "});"
+        "if(!matched){"
+        "select.value='';"
+        "}"
         "select.disabled=false;"
         "};"
         "const loadDevices=async()=>{"
@@ -1157,7 +1180,11 @@ def create_app() -> FastAPI:
     )
     async def configure_settings(request: Request) -> HTMLResponse:
         devices_url = app.url_path_for("list_devices")
-        content = _settings_content(devices_url)
+        settings = await run_in_threadpool(
+            fetch_settings, ["preferred_device"]
+        )
+        save_url = app.url_path_for("save_settings")
+        content = _settings_content(devices_url, settings, save_url)
         return _render_config_page(
             request,
             app,
@@ -1166,6 +1193,26 @@ def create_app() -> FastAPI:
             content=content,
             show_resource_form=False,
         )
+
+    @app.post(
+        "/configure/settings",
+        name="save_settings",
+    )
+    async def save_settings_handler(request: Request) -> Response:
+        form_data = await request.form()
+        settings_payload: dict[str, str | None] = {}
+        for key, value in form_data.multi_items():
+            normalized_key = str(key)
+            if hasattr(value, "filename") and hasattr(value, "file"):
+                continue
+            if isinstance(value, str) or value is None:
+                settings_payload[normalized_key] = value
+            else:
+                settings_payload[normalized_key] = str(value)
+
+        await run_in_threadpool(store_settings, settings_payload)
+        redirect_url = app.url_path_for("configure_settings")
+        return RedirectResponse(url=redirect_url, status_code=303)
 
     @app.post("/configure/channels", name="create_channel")
     async def create_channel(
