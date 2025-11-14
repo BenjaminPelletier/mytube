@@ -6,12 +6,16 @@ import asyncio
 import dataclasses
 import json
 import inspect
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import pyytlounge
 
 __all__ = ["PairingError", "pair_with_link_code"]
+
+
+logger = logging.getLogger(__name__)
 
 
 class PairingError(RuntimeError):
@@ -50,9 +54,11 @@ def pair_with_link_code(link_code: str) -> dict[str, Any]:
     if not normalized_code:
         raise PairingError("Enter the full Link with TV code from your TV.")
 
-    callables = list(_iter_pairing_callables())
+    callables, diagnostics, client_errors = _collect_pairing_callables()
     if not callables:
-        raise PairingError("pyytlounge pairing API is unavailable.")
+        message = _format_pairing_unavailable_message(diagnostics, client_errors)
+        logger.debug(message)
+        raise PairingError(message)
 
     last_type_error: Exception | None = None
     for candidate in callables:
@@ -68,7 +74,9 @@ def pair_with_link_code(link_code: str) -> dict[str, Any]:
 
         return _normalize_auth_payload(result)
 
-    raise PairingError("pyytlounge pairing API is unavailable.") from last_type_error
+    message = _format_pairing_unavailable_message(diagnostics, client_errors)
+    logger.debug(message)
+    raise PairingError(message) from last_type_error
 
 
 def _normalize_code(link_code: str) -> str:
@@ -80,27 +88,48 @@ def _normalize_code(link_code: str) -> str:
     return condensed.upper()
 
 
-def _iter_pairing_callables() -> Sequence[Callable[[str], Any]]:
-    """Yield pairing callables exposed by :mod:`pyytlounge`."""
+def _collect_pairing_callables() -> tuple[
+    Sequence[Callable[[str], Any]],
+    list[dict[str, Any]],
+    list[str],
+]:
+    """Inspect :mod:`pyytlounge` for pairing helpers and diagnostics."""
 
     candidates: list[Callable[[str], Any]] = []
+    diagnostics: list[dict[str, Any]] = []
+    errors: list[str] = []
 
-    modules_to_probe: list[Any] = [pyytlounge]
+    modules_to_probe: list[tuple[Any, str]] = []
+
+    modules_to_probe.append((pyytlounge, getattr(pyytlounge, "__name__", "pyytlounge")))
+
     pairing_module = getattr(pyytlounge, "pairing", None)
     if pairing_module is not None:
-        modules_to_probe.append(pairing_module)
+        pairing_name = getattr(pairing_module, "__name__", "pyytlounge.pairing")
+        modules_to_probe.append((pairing_module, pairing_name))
 
         client_cls = getattr(pairing_module, "PairingClient", None)
         if client_cls is not None:
+            client_label = f"{getattr(client_cls, '__module__', 'pyytlounge')}.{getattr(client_cls, '__name__', 'PairingClient')}"
             try:
                 client = client_cls()
-            except Exception:  # pragma: no cover - defensive
-                client = None
-            if client is not None:
-                modules_to_probe.append(client)
+            except Exception as exc:  # pragma: no cover - defensive
+                errors.append(f"{client_label}() -> {exc.__class__.__name__}: {exc}")
+            else:
+                modules_to_probe.append((client, f"{client_label}()"))
 
     seen: set[int] = set()
-    for module in modules_to_probe:
+    for module, label in modules_to_probe:
+        callable_names: list[str] = []
+        pairing_attributes: list[str] = []
+
+        try:
+            attribute_names = dir(module)
+        except Exception:  # pragma: no cover - defensive
+            attribute_names = []
+        else:
+            pairing_attributes = sorted(name for name in attribute_names if name.startswith("pair"))
+
         for name in _PAIRING_CALLABLE_NAMES:
             attr = getattr(module, name, None)
             if callable(attr):
@@ -108,9 +137,18 @@ def _iter_pairing_callables() -> Sequence[Callable[[str], Any]]:
                 if identity in seen:
                     continue
                 seen.add(identity)
+                callable_names.append(name)
                 candidates.append(attr)
 
-    return candidates
+        diagnostics.append(
+            {
+                "label": label,
+                "callable_names": callable_names,
+                "pairing_attributes": pairing_attributes,
+            }
+        )
+
+    return candidates, diagnostics, errors
 
 
 def _normalize_auth_payload(result: Any) -> dict[str, Any]:
@@ -174,3 +212,38 @@ def _json_default(obj: Any) -> Any:
     if hasattr(obj, "__dict__"):
         return obj.__dict__
     return str(obj)
+
+
+def _format_pairing_unavailable_message(
+    diagnostics: Sequence[Mapping[str, Any]],
+    client_errors: Sequence[str],
+) -> str:
+    """Compose a detailed error message for missing pyytlounge helpers."""
+
+    version = getattr(pyytlounge, "__version__", None)
+
+    message_parts = [
+        "pyytlounge pairing API is unavailable.",
+        "Looked for pairing callables named pair_link_code, pair_code, pair, pair_with_code.",
+    ]
+
+    if version:
+        message_parts.append(f"Detected pyytlounge {version}.")
+
+    if diagnostics:
+        segments: list[str] = []
+        for entry in diagnostics:
+            label = str(entry.get("label", "pyytlounge"))
+            pairing_attributes = entry.get("pairing_attributes") or []
+            if pairing_attributes:
+                segment = f"{label}: {', '.join(pairing_attributes)}"
+            else:
+                segment = f"{label}: no attributes starting with 'pair'"
+            segments.append(segment)
+
+        message_parts.append("Inspected modules - " + "; ".join(segments) + ".")
+
+    if client_errors:
+        message_parts.append("Encountered errors: " + "; ".join(client_errors) + ".")
+
+    return " ".join(message_parts)

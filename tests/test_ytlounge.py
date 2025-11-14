@@ -64,3 +64,23 @@ def test_pair_with_link_code_rejects_empty_code(monkeypatch: pytest.MonkeyPatch)
 
     with pytest.raises(ytlounge.PairingError):
         ytlounge.pair_with_link_code("   ")
+
+
+def test_pair_with_link_code_reports_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_pairing_module = types.SimpleNamespace()
+    fake_pairing_module.__name__ = "pyytlounge.pairing"
+    fake_pairing_module.PairingClient = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    fake_pairing_module.pair_dummy = lambda code: code
+
+    fake_module = types.SimpleNamespace(pairing=fake_pairing_module, __version__="3.2.0")
+    fake_module.__name__ = "pyytlounge"
+
+    monkeypatch.setattr(ytlounge, "pyytlounge", fake_module)
+
+    with pytest.raises(ytlounge.PairingError) as excinfo:
+        ytlounge.pair_with_link_code("ABCD")
+
+    message = str(excinfo.value)
+    assert "3.2.0" in message
+    assert "pair_dummy" in message
+    assert "RuntimeError" in message
