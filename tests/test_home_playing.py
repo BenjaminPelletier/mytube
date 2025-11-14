@@ -75,3 +75,4 @@ def test_build_playing_context_defaults_title_to_identifier() -> None:
 
     assert context["title"] == "abc123"
     assert context["thumbnail_url"] == "http://example.com/320.jpg"
+    assert context["video_id"] == "abc123"

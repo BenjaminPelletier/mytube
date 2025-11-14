@@ -102,9 +102,20 @@ def _install_fastapi_stubs() -> None:
     if "pychromecast" not in sys.modules:
         pychromecast_module = types.ModuleType("pychromecast")
 
+        class _MediaController:  # pragma: no cover - stub
+            def play(self) -> None:
+                return None
+
+            def pause(self) -> None:
+                return None
+
+            def stop(self) -> None:
+                return None
+
         class _Chromecast:  # pragma: no cover - stub
             def __init__(self, name: str = "Stub"):
                 self.name = name
+                self.media_controller = _MediaController()
 
             def wait(self) -> None:
                 return None

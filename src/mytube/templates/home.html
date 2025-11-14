@@ -15,6 +15,13 @@
       <img class="thumbnail" src="{{ playing.thumbnail_url }}" alt="Thumbnail for {{ playing.title }}">
       {% endif %}
       <p class="title">{{ playing.title }}</p>
+      {% if playing.video_id and playback_controls %}
+      <div class="playback-controls" role="group" aria-label="Playback controls">
+        {% for control in playback_controls %}
+        <a class="control-button" href="{{ control.url }}?playing={{ playing.video_id }}">{{ control.label }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
     </section>
     {% endif %}
     {% if videos %}

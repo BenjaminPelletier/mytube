@@ -21,6 +21,7 @@ from .casting import (
     CastResult,
     ChromecastUnavailableError,
     cast_youtube_video,
+    control_youtube_playback,
     discover_chromecast_names,
 )
 from .db import (
@@ -884,6 +885,13 @@ def _build_playing_context(video_record: dict[str, Any], video_id: str) -> dict[
     }
 
 
+PLAYBACK_ACTION_LABELS = {
+    "play": "Resume",
+    "pause": "Pause",
+    "stop": "Stop",
+}
+
+
 def create_app() -> FastAPI:
     """Create a configured FastAPI application instance."""
 
@@ -899,6 +907,14 @@ def create_app() -> FastAPI:
         playing: dict[str, str | None] | None = None,
         videos: list[dict[str, str | None]] | None = None,
     ) -> HTMLResponse:
+        playback_controls = [
+            {
+                "action": action,
+                "label": label,
+                "url": app.url_path_for("control_playback", action=action),
+            }
+            for action, label in PLAYBACK_ACTION_LABELS.items()
+        ]
         return templates.TemplateResponse(
             "home.html",
             {
@@ -908,19 +924,19 @@ def create_app() -> FastAPI:
                 "status": status,
                 "playing": playing,
                 "videos": videos or [],
+                "playback_controls": playback_controls,
             },
         )
 
-    @app.get("/", response_class=HTMLResponse)
-    async def home(
-        request: Request, playing: str | None = Query(default=None, min_length=1)
-    ) -> HTMLResponse:
+    async def _load_home_context(
+        playing_param: str | None,
+    ) -> tuple[str | None, dict[str, str | None] | None, list[dict[str, str | None]]]:
         playing_video: dict[str, str | None] | None = None
         status_message: str | None = None
         video_options: list[dict[str, str | None]] = []
 
-        if playing:
-            video_id = playing.strip()
+        if playing_param:
+            video_id = playing_param.strip()
             if video_id:
                 video_record, load_error = await _load_video_record(video_id)
 
@@ -964,9 +980,53 @@ def create_app() -> FastAPI:
                 }
             )
 
+        return status_message, playing_video, video_options
+
+    @app.get("/", response_class=HTMLResponse)
+    async def home(
+        request: Request, playing: str | None = Query(default=None, min_length=1)
+    ) -> HTMLResponse:
+        status_message, playing_video, video_options = await _load_home_context(playing)
         return _render(
             request,
             status=status_message,
+            playing=playing_video,
+            videos=video_options,
+        )
+
+    @app.get("/cast/control/{action}", response_class=HTMLResponse)
+    async def control_playback(
+        request: Request,
+        action: str,
+        playing: str | None = Query(default=None, min_length=1),
+        device: str | None = None,
+    ) -> HTMLResponse:
+        normalized = action.lower()
+        if normalized not in PLAYBACK_ACTION_LABELS:
+            raise HTTPException(status_code=404, detail="Unknown playback action")
+
+        status_message: str | None
+        try:
+            device_name = await run_in_threadpool(
+                control_youtube_playback, normalized, device_name=device
+            )
+        except ChromecastUnavailableError as exc:  # pragma: no cover - hardware required
+            logger.warning("Chromecast unavailable: %s", exc)
+            status_message = str(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Unknown playback action") from exc
+        else:
+            label = PLAYBACK_ACTION_LABELS[normalized]
+            status_message = f"Sent {label.lower()} command to Chromecast '{device_name}'."
+
+        home_status, playing_video, video_options = await _load_home_context(playing)
+
+        combined_status_parts = [part for part in (status_message, home_status) if part]
+        combined_status = " ".join(combined_status_parts) if combined_status_parts else None
+
+        return _render(
+            request,
+            status=combined_status,
             playing=playing_video,
             videos=video_options,
         )
