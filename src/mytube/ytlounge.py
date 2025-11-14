@@ -103,20 +103,29 @@ def _collect_pairing_callables() -> tuple[
 
     modules_to_probe.append((pyytlounge, getattr(pyytlounge, "__name__", "pyytlounge")))
 
+    def _maybe_add_pairing_client(container: Any) -> None:
+        client_cls = getattr(container, "PairingClient", None)
+        if client_cls is None:
+            return
+
+        client_label = (
+            f"{getattr(client_cls, '__module__', 'pyytlounge')}"
+            f".{getattr(client_cls, '__name__', 'PairingClient')}"
+        )
+        try:
+            client = client_cls()
+        except Exception as exc:  # pragma: no cover - defensive
+            errors.append(f"{client_label}() -> {exc.__class__.__name__}: {exc}")
+        else:
+            modules_to_probe.append((client, f"{client_label}()"))
+
+    _maybe_add_pairing_client(pyytlounge)
+
     pairing_module = getattr(pyytlounge, "pairing", None)
     if pairing_module is not None:
         pairing_name = getattr(pairing_module, "__name__", "pyytlounge.pairing")
         modules_to_probe.append((pairing_module, pairing_name))
-
-        client_cls = getattr(pairing_module, "PairingClient", None)
-        if client_cls is not None:
-            client_label = f"{getattr(client_cls, '__module__', 'pyytlounge')}.{getattr(client_cls, '__name__', 'PairingClient')}"
-            try:
-                client = client_cls()
-            except Exception as exc:  # pragma: no cover - defensive
-                errors.append(f"{client_label}() -> {exc.__class__.__name__}: {exc}")
-            else:
-                modules_to_probe.append((client, f"{client_label}()"))
+        _maybe_add_pairing_client(pairing_module)
 
     seen: set[int] = set()
     for module, label in modules_to_probe:

@@ -29,6 +29,23 @@ def test_pair_with_link_code_uses_client(monkeypatch: pytest.MonkeyPatch) -> Non
     assert result == {"token": "abcdefgh"}
 
 
+def test_pair_with_link_code_uses_top_level_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeClient:
+        def pair(self, code: str) -> dict[str, str]:
+            captured["code"] = code
+            return {"token": code[::-1]}
+
+    fake_module = types.SimpleNamespace(PairingClient=lambda: FakeClient())
+    monkeypatch.setattr(ytlounge, "pyytlounge", fake_module)
+
+    result = ytlounge.pair_with_link_code("ABCD")
+
+    assert captured["code"] == "ABCD"
+    assert result == {"token": "DCBA"}
+
+
 def test_pair_with_link_code_converts_dataclass(monkeypatch: pytest.MonkeyPatch) -> None:
     @dataclass
     class Payload:
