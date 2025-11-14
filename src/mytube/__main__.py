@@ -16,7 +16,7 @@ def main() -> None:
     args = parser.parse_args()
 
     app = create_app()
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, workers=1)
 
 
 if __name__ == "__main__":  # pragma: no cover - direct execution guard

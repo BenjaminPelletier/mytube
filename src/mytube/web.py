@@ -7,7 +7,7 @@ import logging
 import random
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
@@ -22,6 +22,7 @@ from .casting import (
     cast_youtube_video,
     discover_chromecast_names,
 )
+from .lounge import LoungeManager, coerce_auth_state
 from .db import (
     fetch_all_channels,
     fetch_all_playlists,
@@ -44,7 +45,7 @@ from .db import (
     store_settings,
     set_resource_label,
 )
-from .ytlounge import PairingError, dumps_auth_payload, pair_with_link_code
+from .ytlounge import PairingError, dumps_auth_payload
 from .youtube import (
     fetch_youtube_channel_sections,
     fetch_youtube_channels,
@@ -61,6 +62,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 static_directory = BASE_DIR / "static"
 
 YOUTUBE_VIDEO_ID = "CYlon2tvywA"
+LOUNGE_REMOTE_NAME = "MyTube Remote"
 
 RESOURCE_NAVIGATION = (
     ("channels", "Channels"),
@@ -255,22 +257,32 @@ def _settings_content(
     settings: dict[str, str],
     save_url: str,
     pair_url: str,
+    lounge_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "devices_url": devices_url,
         "save_url": save_url,
         "pair_url": pair_url,
         "settings": settings or {},
+        "lounge_status": lounge_status,
     }
 
 
-def _pair_and_store(code: str) -> dict[str, Any]:
-    """Pair with the YouTube app and persist the auth payload."""
+def _load_lounge_auth(settings: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Deserialize stored lounge credentials, if present."""
 
-    payload = pair_with_link_code(code)
-    json_payload = dumps_auth_payload(payload)
-    store_settings({"youtube_app_auth": json_payload})
-    return payload
+    raw_value = settings.get("youtube_app_auth")
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, str) and not raw_value.strip():
+        return None
+
+    try:
+        return coerce_auth_state(raw_value)
+    except ValueError:
+        logger.warning("Stored YouTube app auth payload is invalid.")
+    return None
 
 
 def _playlists_overview_content(playlists: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -674,6 +686,27 @@ def create_app() -> FastAPI:
     initialize_database()
     app = FastAPI(title="MyTube Remote")
 
+    lounge_manager = LoungeManager(default_name=LOUNGE_REMOTE_NAME)
+    app.state.lounge = lounge_manager
+
+    @app.on_event("startup")
+    async def startup_lounge_manager() -> None:
+        settings = await run_in_threadpool(fetch_settings, ["youtube_app_auth"])
+        auth_state = _load_lounge_auth(settings)
+        if not auth_state:
+            return
+        try:
+            await lounge_manager.upsert_from_auth(auth_state, name=LOUNGE_REMOTE_NAME)
+        except Exception:  # pragma: no cover - best effort startup
+            logger.warning(
+                "Unable to connect to the paired YouTube TV during startup.",
+                exc_info=True,
+            )
+
+    @app.on_event("shutdown")
+    async def shutdown_lounge_manager() -> None:
+        await lounge_manager.shutdown()
+
     if static_directory.exists():
         app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
@@ -879,7 +912,35 @@ def create_app() -> FastAPI:
         )
         save_url = app.url_path_for("save_settings")
         pair_url = app.url_path_for("pair_youtube_app")
-        settings_context = _settings_content(devices_url, settings, save_url, pair_url)
+        lounge_status: dict[str, Any] | None = None
+        auth_state = _load_lounge_auth(settings)
+        lounge_manager_dep = getattr(app.state, "lounge", None)
+        if isinstance(lounge_manager_dep, LoungeManager) and auth_state:
+            screen_id = auth_state.get("screenId")
+            try:
+                controller = await lounge_manager_dep.get(screen_id) if screen_id else None
+                if controller is None and screen_id:
+                    controller = await lounge_manager_dep.upsert_from_auth(
+                        auth_state, name=LOUNGE_REMOTE_NAME
+                    )
+                if controller is not None:
+                    lounge_status = await controller.get_status()
+            except Exception as exc:  # pragma: no cover - best effort status
+                logger.warning(
+                    "Unable to retrieve YouTube TV status for screen %s.",
+                    screen_id,
+                    exc_info=True,
+                )
+                lounge_status = {
+                    "screen_id": screen_id,
+                    "name": LOUNGE_REMOTE_NAME,
+                    "connected": False,
+                    "error": str(exc),
+                }
+
+        settings_context = _settings_content(
+            devices_url, settings, save_url, pair_url, lounge_status
+        )
         return _render_config_page(
             request,
             app,
@@ -932,8 +993,17 @@ def create_app() -> FastAPI:
                 detail="Link with TV code is required.",
             )
 
+        lounge_manager_dep = getattr(request.app.state, "lounge", None)
+        if not isinstance(lounge_manager_dep, LoungeManager):
+            raise HTTPException(
+                status_code=503,
+                detail="TV lounge controller is not available.",
+            )
+
         try:
-            await run_in_threadpool(_pair_and_store, code_value)
+            payload = await lounge_manager_dep.pair_with_code(
+                code_value, name=LOUNGE_REMOTE_NAME
+            )
         except PairingError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:  # pragma: no cover - defensive
@@ -943,6 +1013,8 @@ def create_app() -> FastAPI:
                 detail="Unable to pair with the YouTube app.",
             ) from exc
 
+        json_payload = dumps_auth_payload(payload)
+        await run_in_threadpool(store_settings, {"youtube_app_auth": json_payload})
         return {"status": "ok"}
 
     @app.post("/configure/channels", name="create_channel")

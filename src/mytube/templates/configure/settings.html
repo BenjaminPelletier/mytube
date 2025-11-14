@@ -19,6 +19,25 @@
 <section class="settings-section">
   <h2>YouTube App Pairing</h2>
   <p>Link MyTube with the YouTube app to cast directly from your TV.</p>
+  <div class="pair-status-container">
+    {% if lounge_status %}
+      {% if lounge_status.connected %}
+        <p class="pair-status pair-status--ok">
+          Connected to {{ lounge_status.screen_name or lounge_status.name or 'your TV' }}.
+        </p>
+      {% else %}
+        <p class="pair-status pair-status--error">
+          {% if lounge_status.error %}
+            Unable to connect to the paired TV: {{ lounge_status.error }}
+          {% else %}
+            Unable to connect to the paired TV.
+          {% endif %}
+        </p>
+      {% endif %}
+    {% else %}
+      <p class="pair-status pair-status--unknown">No paired TV detected.</p>
+    {% endif %}
+  </div>
   <form id="youtube-pair-form" class="pair-form" novalidate>
     <label class="pair-label" for="youtube-link-code">Link with TV code</label>
     <div class="pair-fields">
