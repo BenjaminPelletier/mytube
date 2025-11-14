@@ -168,6 +168,7 @@ def _install_fastapi_stubs() -> None:
         exceptions_module.NotPairedException = _NotPaired
 
         wrapper_module = types.ModuleType("pyytlounge.wrapper")
+        models_module = types.ModuleType("pyytlounge.models")
 
         class _YtLoungeApi:  # pragma: no cover - stub
             def __init__(self, name: str):
@@ -207,14 +208,18 @@ def _install_fastapi_stubs() -> None:
                 self._connected = False
 
         wrapper_module.YtLoungeApi = _YtLoungeApi
+        models_module.AUTH_VERSION_V1 = 0
+        models_module.CURRENT_AUTH_VERSION = 0
 
         pyytlounge_module.pairing = pairing_module
         pyytlounge_module.YtLoungeApi = _YtLoungeApi
+        pyytlounge_module.models = models_module
 
         sys.modules["pyytlounge"] = pyytlounge_module
         sys.modules["pyytlounge.pairing"] = pairing_module
         sys.modules["pyytlounge.exceptions"] = exceptions_module
         sys.modules["pyytlounge.wrapper"] = wrapper_module
+        sys.modules["pyytlounge.models"] = models_module
 
 
 _install_fastapi_stubs()

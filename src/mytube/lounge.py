@@ -8,6 +8,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from pyytlounge import models as lounge_models
 from pyytlounge.exceptions import NotConnectedException, NotLinkedException, NotPairedException
 from pyytlounge.wrapper import YtLoungeApi
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 _CONNECTION_RETRIES = 6
 _BASE_BACKOFF = 0.5
 _MAX_BACKOFF = 10.0
+_DEFAULT_AUTH_VERSION = lounge_models.CURRENT_AUTH_VERSION
 
 
 def normalize_link_code(link_code: str) -> str:
@@ -47,7 +49,13 @@ def coerce_auth_state(auth_state: Mapping[str, Any] | str) -> dict[str, Any]:
     if not isinstance(auth_state, Mapping):  # pragma: no cover - defensive
         raise ValueError("Auth state must be a mapping")
 
-    version = int(auth_state.get("version") or 1)
+    version_value = auth_state.get("version", _DEFAULT_AUTH_VERSION)
+    if version_value is None:
+        version_value = _DEFAULT_AUTH_VERSION
+    try:
+        version = int(version_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Auth payload has an invalid version") from exc
     screen_id = (
         auth_state.get("screenId")
         or auth_state.get("screen_id")
