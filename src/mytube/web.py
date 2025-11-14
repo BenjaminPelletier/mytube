@@ -361,7 +361,7 @@ def _settings_content(
         "<form id=\"youtube-pair-form\" class=\"pair-form\" novalidate>"
         "<label class=\"pair-label\" for=\"youtube-link-code\">Link with TV code</label>"
         "<div class=\"pair-fields\">"
-        "<input id=\"youtube-link-code\" name=\"link_code\" class=\"pair-input\" type=\"text\" autocomplete=\"off\" placeholder=\"XXXX-XXXX-XXXX\" required>"
+        "<input id=\"youtube-link-code\" name=\"link_code\" class=\"pair-input\" type=\"text\" autocomplete=\"off\" placeholder=\"XXX XXX XXX XXX\" required>"
         "<button type=\"submit\" id=\"youtube-pair-button\" class=\"pair-button\">Pair</button>"
         "</div>"
         "<p class=\"settings-help\">Find the code in the YouTube app under Settings → Link with TV code.</p>"
