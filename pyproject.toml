@@ -5,12 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mytube"
 version = "0.1.0"
-description = "Simple Chromecast remote for a recommended YouTube video."
+description = "Simple YouTube remote for a curated video collection."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
-    "PyChromecast>=13.0",
-    "pyytlounge>=0.3",
+    "pyytlounge>=3.2.0",
     "uvicorn>=0.22",
     "python-multipart>=0.0.9",
     "sqlmodel>=0.0.14",

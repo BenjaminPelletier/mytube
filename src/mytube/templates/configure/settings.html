@@ -2,21 +2,6 @@
 
 {% block content %}
 <section class="settings-section">
-  <h2>Playback Settings</h2>
-  <p>Choose the Chromecast device MyTube should prioritize when casting.</p>
-  <form class="settings-form" method="post" action="{{ save_url }}">
-    <div class="settings-group">
-      <label class="settings-label" for="preferred-device">Preferred casting device</label>
-      <select id="preferred-device" name="preferred_device" class="settings-select" disabled>
-        <option>Loading devices...</option>
-      </select>
-    </div>
-    <div class="settings-actions">
-      <button type="submit" class="settings-save-button">Save Settings</button>
-    </div>
-  </form>
-</section>
-<section class="settings-section">
   <h2>YouTube App Pairing</h2>
   <p>Link MyTube with the YouTube app to cast directly from your TV.</p>
   <div class="pair-status-container">
@@ -64,84 +49,12 @@
 </section>
 <script>
   (function () {
-    const select = document.getElementById('preferred-device');
     const settings = {{ settings | tojson }};
-    const devicesEndpoint = {{ devices_url | tojson }};
     const pairEndpoint = {{ pair_url | tojson }};
     const preferredRaw = settings && typeof settings.preferred_device === 'string'
       ? settings.preferred_device
       : '';
     const preferred = preferredRaw.trim();
-
-    const setSingleOption = (label) => {
-      if (!select) {
-        return;
-      }
-      select.innerHTML = '';
-      const option = document.createElement('option');
-      option.textContent = label;
-      option.value = '';
-      option.disabled = true;
-      option.selected = true;
-      select.append(option);
-      select.disabled = true;
-    };
-
-    const enableSelect = (devices) => {
-      if (!select) {
-        return;
-      }
-      select.innerHTML = '';
-      const noneOption = document.createElement('option');
-      noneOption.textContent = 'No preferred device';
-      noneOption.value = '';
-      select.append(noneOption);
-      let matched = false;
-      devices.forEach((name) => {
-        if (typeof name !== 'string') {
-          return;
-        }
-        const trimmed = name.trim();
-        if (!trimmed) {
-          return;
-        }
-        const option = document.createElement('option');
-        option.value = trimmed;
-        option.textContent = trimmed;
-        if (!matched && preferred && trimmed === preferred) {
-          option.selected = true;
-          matched = true;
-        }
-        select.append(option);
-      });
-      if (!matched) {
-        select.value = '';
-      }
-      select.disabled = false;
-    };
-
-    const loadDevices = async () => {
-      if (!select) {
-        return;
-      }
-      try {
-        const response = await fetch(devicesEndpoint);
-        if (!response.ok) {
-          throw new Error('Request failed');
-        }
-        const payload = await response.json();
-        const devices = Array.isArray(payload.devices) ? payload.devices : [];
-        if (devices.length === 0) {
-          setSingleOption('No devices found');
-          return;
-        }
-        enableSelect(devices);
-      } catch (error) {
-        setSingleOption('Unable to load devices');
-      }
-    };
-
-    loadDevices();
 
     const pairForm = document.getElementById('youtube-pair-form');
     if (!pairForm) {

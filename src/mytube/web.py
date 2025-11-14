@@ -16,12 +16,6 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
-from .casting import (
-    CastResult,
-    ChromecastUnavailableError,
-    cast_youtube_video,
-    discover_chromecast_names,
-)
 from .lounge import LoungeManager, coerce_auth_state
 from .db import (
     fetch_all_channels,
@@ -253,14 +247,12 @@ def _listed_videos_content(
 
 
 def _settings_content(
-    devices_url: str,
     settings: dict[str, str],
     save_url: str,
     pair_url: str,
     lounge_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
-        "devices_url": devices_url,
         "save_url": save_url,
         "pair_url": pair_url,
         "settings": settings or {},
@@ -721,8 +713,6 @@ def create_app() -> FastAPI:
             "home.html",
             {
                 "request": request,
-                "cast_url": app.url_path_for("cast_featured"),
-                "devices_url": app.url_path_for("list_devices"),
                 "videos_api_url": app.url_path_for("list_random_videos"),
                 "status": status,
                 "playing": playing,
@@ -793,7 +783,6 @@ def create_app() -> FastAPI:
                     "video_id": video_id,
                     "title": title,
                     "thumbnail_url": thumbnail_url,
-                    "cast_url": app.url_path_for("cast_video", video_id=video_id),
                 }
             )
 
@@ -924,7 +913,6 @@ def create_app() -> FastAPI:
         name="configure_settings",
     )
     async def configure_settings(request: Request) -> HTMLResponse:
-        devices_url = app.url_path_for("list_devices")
         settings = await run_in_threadpool(
             fetch_settings, ["preferred_device", "youtube_app_auth"]
         )
@@ -958,7 +946,7 @@ def create_app() -> FastAPI:
                 }
 
         settings_context = _settings_content(
-            devices_url, settings, save_url, pair_url, lounge_status
+            settings, save_url, pair_url, lounge_status
         )
         return _render_config_page(
             request,
@@ -1428,51 +1416,4 @@ def create_app() -> FastAPI:
             resource_value=resource_id,
         )
 
-    @app.get("/devices")
-    async def list_devices() -> dict[str, list[str]]:
-        devices = await run_in_threadpool(discover_chromecast_names)
-        return {"devices": devices}
-
-    @app.get("/cast/video/{video_id}", response_class=HTMLResponse)
-    async def cast_video(
-        request: Request, video_id: str, device: str | None = None
-    ) -> Response:
-        try:
-            result: CastResult = await run_in_threadpool(
-                cast_youtube_video, video_id, device_name=device
-            )
-        except ChromecastUnavailableError as exc:  # pragma: no cover - hardware required
-            logger.warning("Chromecast unavailable: %s", exc)
-            return _render(request, str(exc))
-
-        status = (
-            "Casting YouTube video "
-            f"https://youtu.be/{result.video_id} to Chromecast '{result.device_name}'."
-        )
-        logger.info("%s", status)
-
-        redirect_url = app.url_path_for("home")
-        playing_param = quote(result.video_id, safe="")
-        return RedirectResponse(
-            url=f"{redirect_url}?playing={playing_param}", status_code=303
-        )
-
-    @app.get("/cast", response_class=HTMLResponse)
-    async def cast_featured(request: Request, device: str | None = None) -> HTMLResponse:
-        try:
-            result: CastResult = await run_in_threadpool(
-                cast_youtube_video, YOUTUBE_VIDEO_ID, device_name=device
-            )
-        except ChromecastUnavailableError as exc:  # pragma: no cover - network hardware required
-            logger.warning("Chromecast unavailable: %s", exc)
-            return _render(request, str(exc))
-
-        status = (
-            "Casting YouTube video "
-            f"https://youtu.be/{result.video_id} to Chromecast '{result.device_name}'."
-        )
-        logger.info("%s", status)
-        return _render(request, status)
-
     return app
-

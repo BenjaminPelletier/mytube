@@ -14,14 +14,12 @@ from mytube import web
 
 def test_settings_content_includes_device_loader_and_pairing_ui() -> None:
     content = web._settings_content(  # type: ignore[attr-defined]
-        "/devices",
         {"youtube_app_auth": "stored"},
         "/save",
         "/pair",
         {"connected": True},
     )
 
-    assert content["devices_url"] == "/devices"
     assert content["save_url"] == "/save"
     assert content["pair_url"] == "/pair"
     assert content["settings"]["youtube_app_auth"] == "stored"

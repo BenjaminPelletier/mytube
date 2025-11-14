@@ -23,14 +23,6 @@
     {% if status %}
     <p class="status">{{ status }}</p>
     {% endif %}
-    <div id="device-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="device-modal-title">
-      <div class="modal-content">
-        <h2 id="device-modal-title">Choose a device</h2>
-        <p>Select a Chromecast device to begin casting.</p>
-        <ul id="device-list"></ul>
-        <button id="device-cancel" type="button">Cancel</button>
-      </div>
-    </div>
     <script>
       (() => {
         const videoContainer = document.querySelector(".video-options");
@@ -41,85 +33,8 @@
           return;
         }
 
-        const modal = document.getElementById("device-modal");
-        const deviceList = document.getElementById("device-list");
-        const cancelButton = document.getElementById("device-cancel");
-        let activeCastUrl = "";
-
-        const hideModal = (resetActiveCastUrl = true) => {
-          if (!modal) {
-            return;
-          }
-          modal.classList.add("hidden");
-          if (deviceList) {
-            deviceList.innerHTML = "";
-          }
-          if (resetActiveCastUrl) {
-            activeCastUrl = "";
-          }
-        };
-
-        const redirectToCast = (targetUrl, device) => {
-          if (!targetUrl) {
-            return;
-          }
-          const url = new URL(targetUrl, window.location.origin);
-          if (device) {
-            url.searchParams.set("device", device);
-          }
-          window.location.href = url.toString();
-        };
-
-        const showModal = (devices) => {
-          if (!modal || !deviceList) {
-            redirectToCast(activeCastUrl);
-            return;
-          }
-          deviceList.innerHTML = "";
-          devices.forEach((device) => {
-            const item = document.createElement("li");
-            const button = document.createElement("button");
-            button.type = "button";
-            button.textContent = device;
-            button.addEventListener("click", () => {
-              hideModal(false);
-              redirectToCast(activeCastUrl, device);
-            });
-            item.appendChild(button);
-            deviceList.appendChild(item);
-          });
-          modal.classList.remove("hidden");
-        };
-
-        const handleCastClick = async (event) => {
-          event.preventDefault();
-          const option = event.currentTarget;
-          if (!(option instanceof HTMLElement)) {
-            return;
-          }
-          const targetUrl = option.getAttribute("data-cast-url") || option.getAttribute("href");
-          if (!targetUrl) {
-            return;
-          }
-          activeCastUrl = targetUrl;
-          try {
-            const response = await fetch("{{ devices_url }}");
-            if (!response.ok) {
-              throw new Error("Failed to load devices");
-            }
-            const payload = await response.json();
-            const devices = Array.isArray(payload.devices) ? payload.devices : [];
-            if (devices.length <= 1) {
-              hideModal(false);
-              redirectToCast(activeCastUrl, devices[0]);
-              return;
-            }
-            showModal(devices);
-          } catch (error) {
-            console.error(error);
-            hideModal(false);
-            redirectToCast(activeCastUrl);
-          }
+        const handlePlayVideo = async (event) => {
+          // TODO: attempt to play video
         };
 
         const setLoadingState = (isLoading) => {
@@ -157,18 +72,15 @@
             if (!video || typeof video !== "object") {
               return;
             }
-            const castUrl = typeof video.cast_url === "string" ? video.cast_url : "";
             const thumbnailUrl = typeof video.thumbnail_url === "string" ? video.thumbnail_url : "";
             const title = typeof video.title === "string" ? video.title : "";
 
-            if (!castUrl || !thumbnailUrl || !title) {
+            if (!thumbnailUrl || !title) {
               return;
             }
 
             const option = document.createElement("a");
             option.className = "video-option";
-            option.href = castUrl;
-            option.dataset.castUrl = castUrl;
 
             const thumbnail = document.createElement("img");
             thumbnail.className = "video-thumbnail";
@@ -182,7 +94,7 @@
 
             option.appendChild(thumbnail);
             option.appendChild(label);
-            option.addEventListener("click", handleCastClick);
+            option.addEventListener("click", handlePlayVideo);
 
             fragment.appendChild(option);
           });
@@ -224,20 +136,6 @@
         if (refreshButton) {
           refreshButton.addEventListener("click", () => {
             loadVideos();
-          });
-        }
-
-        if (cancelButton) {
-          cancelButton.addEventListener("click", () => {
-            hideModal();
-          });
-        }
-
-        if (modal) {
-          modal.addEventListener("click", (event) => {
-            if (event.target === modal) {
-              hideModal();
-            }
           });
         }
 
