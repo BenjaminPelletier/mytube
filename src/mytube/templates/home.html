@@ -52,7 +52,7 @@
         const cancelButton = document.getElementById("device-cancel");
         let activeCastUrl = "";
 
-        const hideModal = () => {
+        const hideModal = (resetActiveCastUrl = true) => {
           if (!modal) {
             return;
           }
@@ -60,7 +60,9 @@
           if (deviceList) {
             deviceList.innerHTML = "";
           }
-          activeCastUrl = "";
+          if (resetActiveCastUrl) {
+            activeCastUrl = "";
+          }
         };
 
         const redirectToCast = (targetUrl, device) => {
@@ -86,7 +88,7 @@
             button.type = "button";
             button.textContent = device;
             button.addEventListener("click", () => {
-              hideModal();
+              hideModal(false);
               redirectToCast(activeCastUrl, device);
             });
             item.appendChild(button);
@@ -114,14 +116,14 @@
             const payload = await response.json();
             const devices = Array.isArray(payload.devices) ? payload.devices : [];
             if (devices.length <= 1) {
-              hideModal();
+              hideModal(false);
               redirectToCast(activeCastUrl, devices[0]);
               return;
             }
             showModal(devices);
           } catch (error) {
             console.error(error);
-            hideModal();
+            hideModal(false);
             redirectToCast(activeCastUrl);
           }
         };
