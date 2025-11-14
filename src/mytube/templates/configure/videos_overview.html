@@ -1,0 +1,18 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section>
+  <h2>Stored Videos</h2>
+  {% if videos %}
+  <ol>
+    {% for video in videos %}
+    <li>
+      <a href="{{ video.url }}">{{ video.title }}</a>{% if video.vote %} {{ video.vote }}{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No videos have been stored yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

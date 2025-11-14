@@ -1,0 +1,211 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section class="settings-section">
+  <h2>Playback Settings</h2>
+  <p>Choose the Chromecast device MyTube should prioritize when casting.</p>
+  <form class="settings-form" method="post" action="{{ save_url }}">
+    <div class="settings-group">
+      <label class="settings-label" for="preferred-device">Preferred casting device</label>
+      <select id="preferred-device" name="preferred_device" class="settings-select" disabled>
+        <option>Loading devices...</option>
+      </select>
+    </div>
+    <div class="settings-actions">
+      <button type="submit" class="settings-save-button">Save Settings</button>
+    </div>
+  </form>
+</section>
+<section class="settings-section">
+  <h2>YouTube App Pairing</h2>
+  <p>Link MyTube with the YouTube app to cast directly from your TV.</p>
+  <form id="youtube-pair-form" class="pair-form" novalidate>
+    <label class="pair-label" for="youtube-link-code">Link with TV code</label>
+    <div class="pair-fields">
+      <input
+        id="youtube-link-code"
+        name="link_code"
+        class="pair-input"
+        type="text"
+        autocomplete="off"
+        placeholder="XXX XXX XXX XXX"
+        required
+      >
+      <button type="submit" id="youtube-pair-button" class="pair-button">Pair</button>
+    </div>
+    <p class="settings-help">Find the code in the YouTube app under Settings → Link with TV code.</p>
+  </form>
+  <dialog id="settings-error-dialog" class="settings-modal" aria-labelledby="settings-error-title">
+    <form method="dialog" class="settings-modal-content">
+      <h3 id="settings-error-title">Pairing error</h3>
+      <p id="settings-error-message"></p>
+      <button type="submit" value="close" class="settings-modal-close">Close</button>
+    </form>
+  </dialog>
+</section>
+<script>
+  (function () {
+    const select = document.getElementById('preferred-device');
+    const settings = {{ settings | tojson }};
+    const devicesEndpoint = {{ devices_url | tojson }};
+    const pairEndpoint = {{ pair_url | tojson }};
+    const preferredRaw = settings && typeof settings.preferred_device === 'string'
+      ? settings.preferred_device
+      : '';
+    const preferred = preferredRaw.trim();
+
+    const setSingleOption = (label) => {
+      if (!select) {
+        return;
+      }
+      select.innerHTML = '';
+      const option = document.createElement('option');
+      option.textContent = label;
+      option.value = '';
+      option.disabled = true;
+      option.selected = true;
+      select.append(option);
+      select.disabled = true;
+    };
+
+    const enableSelect = (devices) => {
+      if (!select) {
+        return;
+      }
+      select.innerHTML = '';
+      const noneOption = document.createElement('option');
+      noneOption.textContent = 'No preferred device';
+      noneOption.value = '';
+      select.append(noneOption);
+      let matched = false;
+      devices.forEach((name) => {
+        if (typeof name !== 'string') {
+          return;
+        }
+        const trimmed = name.trim();
+        if (!trimmed) {
+          return;
+        }
+        const option = document.createElement('option');
+        option.value = trimmed;
+        option.textContent = trimmed;
+        if (!matched && preferred && trimmed === preferred) {
+          option.selected = true;
+          matched = true;
+        }
+        select.append(option);
+      });
+      if (!matched) {
+        select.value = '';
+      }
+      select.disabled = false;
+    };
+
+    const loadDevices = async () => {
+      if (!select) {
+        return;
+      }
+      try {
+        const response = await fetch(devicesEndpoint);
+        if (!response.ok) {
+          throw new Error('Request failed');
+        }
+        const payload = await response.json();
+        const devices = Array.isArray(payload.devices) ? payload.devices : [];
+        if (devices.length === 0) {
+          setSingleOption('No devices found');
+          return;
+        }
+        enableSelect(devices);
+      } catch (error) {
+        setSingleOption('Unable to load devices');
+      }
+    };
+
+    loadDevices();
+
+    const pairForm = document.getElementById('youtube-pair-form');
+    if (!pairForm) {
+      return;
+    }
+
+    const codeInput = document.getElementById('youtube-link-code');
+    const pairButton = document.getElementById('youtube-pair-button');
+    const errorDialog = document.getElementById('settings-error-dialog');
+    const errorMessage = document.getElementById('settings-error-message');
+    const existingAuth = settings && typeof settings.youtube_app_auth === 'string'
+      ? settings.youtube_app_auth.trim()
+      : '';
+
+    const setButtonState = (label, disabled) => {
+      if (pairButton) {
+        pairButton.textContent = label;
+        pairButton.disabled = !!disabled;
+      }
+    };
+
+    const showError = (message) => {
+      const fallback = message && typeof message === 'string'
+        ? message
+        : 'Unable to pair with the YouTube app.';
+      if (errorDialog && typeof errorDialog.showModal === 'function') {
+        errorMessage.textContent = fallback;
+        try {
+          errorDialog.showModal();
+        } catch (showError) {
+          window.alert(fallback);
+        }
+      } else {
+        window.alert(fallback);
+      }
+    };
+
+    if (existingAuth) {
+      setButtonState('Paired!', true);
+      if (codeInput) {
+        codeInput.disabled = true;
+      }
+    }
+
+    pairForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!codeInput || !pairButton) {
+        return;
+      }
+      const code = codeInput.value.trim();
+      if (!code) {
+        showError('Enter the code displayed on your TV.');
+        codeInput.focus();
+        return;
+      }
+      const originalLabel = pairButton.dataset.originalLabel || pairButton.textContent || 'Pair';
+      pairButton.dataset.originalLabel = originalLabel;
+      setButtonState('Pairing...', true);
+      try {
+        const response = await fetch(pairEndpoint, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({code})
+        });
+        if (!response.ok) {
+          let detail = 'Unable to pair with the YouTube app.';
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload.detail === 'string') {
+              detail = payload.detail;
+            }
+          } catch (ignore) {}
+          throw new Error(detail);
+        }
+        setButtonState('Paired!', true);
+        if (codeInput) {
+          codeInput.disabled = true;
+        }
+      } catch (error) {
+        setButtonState(pairButton.dataset.originalLabel || 'Pair', false);
+        showError(error && typeof error.message === 'string' ? error.message : 'Unable to pair with the YouTube app.');
+      }
+    });
+  })();
+</script>
+{% endblock %}

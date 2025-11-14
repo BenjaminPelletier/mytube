@@ -1,0 +1,52 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+{% if channel %}
+<section>
+  <h2 class="resource-title">
+    <span class="resource-title-text">
+      {{ channel.title }}{% if channel.vote %} {{ channel.vote }}{% endif %}
+    </span>
+    {% if channel.info_url %}
+    <a
+      class="resource-info-link"
+      href="{{ channel.info_url }}"
+      title="View raw YouTube data"
+      aria-label="View raw YouTube data"
+    >🛈</a>
+    {% endif %}
+  </h2>
+  <p><small>ID: {{ channel.id }}</small></p>
+  {% if channel.description %}
+  <p>{{ channel.description }}</p>
+  {% else %}
+  <p><em>No description provided.</em></p>
+  {% endif %}
+  <p><strong>Retrieved:</strong> {{ channel.retrieved_at }}</p>
+  <h3>Channel Sections</h3>
+  {% if channel.sections %}
+  <ol>
+    {% for section in channel.sections %}
+    <li>
+      {% if section.url %}
+      <a href="{{ section.url }}">{{ section.title }}</a>
+      {% else %}
+      {{ section.title }}
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p><em>No channel sections stored.</em></p>
+  {% endif %}
+</section>
+{% else %}
+<section>
+  <h2>Channel Not Found</h2>
+  <p>
+    No stored data is available for this channel. Submit the identifier through the
+    form to fetch it from YouTube.
+  </p>
+</section>
+{% endif %}
+{% endblock %}

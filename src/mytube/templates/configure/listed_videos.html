@@ -1,0 +1,29 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section>
+  <h2>{{ heading_label }} Videos</h2>
+  <form class="regenerate-form" method="post" action="{{ regenerate_url }}">
+    <button type="submit">Regenerate</button>
+  </form>
+  {% if videos %}
+  <ol>
+    {% for video in videos %}
+    <li>
+      <a href="{{ video.url }}">{{ video.title }}</a>
+      {% for group in video.listed_groups %}
+      <p class="resource-vote-line">
+        {{ group.icon }}
+        {% for entry in group.entries %}
+          <a href="{{ entry.url }}">{{ entry.title }}</a>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </p>
+      {% endfor %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No videos have been recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
