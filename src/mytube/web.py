@@ -174,7 +174,6 @@ def _channels_overview_content(channels: list[dict[str, Any]]) -> str:
         if not channel_id:
             continue
         title = channel.get("title") or channel_id
-        retrieved_at = channel.get("retrieved_at") or "Unknown"
         vote = _resource_vote(channel.get("label"))
         encoded_id = quote(channel_id, safe="")
         link = f"<a href=\"/configure/channels/{encoded_id}\">{html.escape(title)}</a>"
@@ -182,7 +181,6 @@ def _channels_overview_content(channels: list[dict[str, Any]]) -> str:
         items.append(
             "<li>"
             f"{link}{vote_display}"
-            f"<br><small>Retrieved: {html.escape(retrieved_at)}</small>"
             "</li>"
         )
 
@@ -220,7 +218,6 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
         if not video_id:
             continue
         title = video.get("title") or video_id
-        retrieved_at = video.get("retrieved_at") or "Unknown"
         vote = _resource_vote(video.get("label"))
         encoded_id = quote(video_id, safe="")
         link = f"<a href=\"/configure/videos/{encoded_id}\">{html.escape(title)}</a>"
@@ -228,7 +225,6 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> str:
         items.append(
             "<li>"
             f"{link}{vote_display}"
-            f"<br><small>Retrieved: {html.escape(retrieved_at)}</small>"
             "</li>"
         )
 
@@ -688,7 +684,7 @@ def _format_listed_line(
         return ""
 
     joined = ", ".join(items)
-    return f"<p>{prefix} {joined}</p>"
+    return f"<p class=\"resource-vote-line\">{prefix} {joined}</p>"
 
 
 def _format_listed_lines(

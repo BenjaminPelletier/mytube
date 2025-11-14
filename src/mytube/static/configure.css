@@ -170,3 +170,11 @@ h1 {
 .resource-info-link:focus {
   opacity: 0.75;
 }
+
+.resource-vote-line {
+  margin: 0.35rem 0 0;
+}
+
+.resource-vote-line + .resource-vote-line {
+  margin-top: 0.2rem;
+}
