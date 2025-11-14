@@ -195,6 +195,13 @@ h1 {
   font-weight: 600;
 }
 
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
 .settings-select {
   padding: 0.55rem 0.75rem;
   border-radius: 0.5rem;
@@ -205,6 +212,28 @@ h1 {
 .settings-select:disabled {
   background: #f6f8fa;
   color: #57606a;
+}
+
+.settings-actions {
+  display: flex;
+}
+
+.settings-save-button {
+  padding: 0.55rem 1.15rem;
+  border-radius: 0.5rem;
+  border: 1px solid #1f883d;
+  background: #1f883d;
+  color: white;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.settings-save-button:hover,
+.settings-save-button:focus-visible {
+  background: #187135;
+  border-color: #187135;
 }
 
 .settings-help {

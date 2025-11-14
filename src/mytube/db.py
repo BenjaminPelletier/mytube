@@ -125,6 +125,15 @@ class ListedVideo(SQLModel, table=True):
     )
 
 
+class Setting(SQLModel, table=True):
+    """Application-level key/value setting."""
+
+    __tablename__ = "settings"
+
+    key: str = Field(primary_key=True)
+    value: str = Field(sa_column=Column("value", Text, nullable=False))
+
+
 def initialize_database() -> None:
     """Ensure the playlist, playlist item, channel, and resource tables exist."""
 
@@ -549,6 +558,60 @@ def set_resource_label(
     with Session(engine) as session_obj:
         _persist(session_obj)
         session_obj.commit()
+
+
+def fetch_settings(keys: Iterable[str] | None = None) -> dict[str, str]:
+    """Retrieve stored application settings as a mapping of key to value."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = select(Setting)
+        key_list: list[str] | None = None
+        if keys is not None:
+            key_list = []
+            for key in keys:
+                if not isinstance(key, str):
+                    key = str(key)
+                normalized_key = key.strip()
+                if normalized_key:
+                    key_list.append(normalized_key)
+            if not key_list:
+                return {}
+            statement = statement.where(Setting.key.in_(key_list))
+
+        results = session.exec(statement)
+        return {setting.key: setting.value for setting in results}
+
+
+def store_settings(settings: dict[str, str | None]) -> None:
+    """Persist the provided settings to the database."""
+
+    if not settings:
+        return
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        for key, value in settings.items():
+            normalized_key = str(key).strip()
+            if not normalized_key:
+                continue
+
+            value_str = ""
+            if value is not None:
+                value_str = str(value).strip()
+
+            existing = session.get(Setting, normalized_key)
+            if not value_str:
+                if existing is not None:
+                    session.delete(existing)
+                continue
+
+            if existing is not None:
+                existing.value = value_str
+            else:
+                session.add(Setting(key=normalized_key, value=value_str))
+
+        session.commit()
 
 
 def fetch_resource_label(
