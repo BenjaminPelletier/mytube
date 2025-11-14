@@ -66,7 +66,8 @@ RESOURCE_NAVIGATION = (
     ("videos", "Videos"),
 )
 LIST_NAVIGATION = (("whitelist", "Whitelist"), ("blacklist", "Blacklist"))
-CONFIG_NAVIGATION = RESOURCE_NAVIGATION + LIST_NAVIGATION
+SETTINGS_NAVIGATION = (("settings", "Settings"),)
+CONFIG_NAVIGATION = RESOURCE_NAVIGATION + LIST_NAVIGATION + SETTINGS_NAVIGATION
 RESOURCE_LABELS = {slug: label for slug, label in RESOURCE_NAVIGATION}
 LIST_PAGE_LABELS = {slug: label for slug, label in LIST_NAVIGATION}
 LIST_PAGE_FIELDS = {"whitelist": "whitelisted_by", "blacklist": "blacklisted_by"}
@@ -84,6 +85,7 @@ CONFIG_ROUTE_NAMES = {
     "videos": "configure_videos",
     "whitelist": "configure_whitelist",
     "blacklist": "configure_blacklist",
+    "settings": "configure_settings",
 }
 
 CREATE_ROUTE_NAMES = {
@@ -320,6 +322,68 @@ def _listed_videos_content(
         "<ol>"
         f"{items_html}"
         "</ol>"
+        "</section>"
+    )
+
+
+def _settings_content(devices_url: str) -> str:
+    devices_endpoint = json.dumps(devices_url)
+    return (
+        "<section class=\"settings-section\">"
+        "<h2>Playback Settings</h2>"
+        "<p>Choose the Chromecast device MyTube should prioritize when casting."
+        " This selection is currently temporary.</p>"
+        "<div class=\"settings-group\">"
+        "<label class=\"settings-label\" for=\"preferred-device\">Preferred casting device</label>"
+        "<select id=\"preferred-device\" class=\"settings-select\" disabled>"
+        "<option>Loading devices...</option>"
+        "</select>"
+        "<p class=\"settings-help\">Device choice will be saved in a future update.</p>"
+        "</div>"
+        "<script>(function(){"
+        "const select=document.getElementById('preferred-device');"
+        "if(!select){return;}"
+        "const setSingleOption=(label)=>{"
+        "select.innerHTML='';"
+        "const option=document.createElement('option');"
+        "option.textContent=label;"
+        "option.value='';"
+        "select.append(option);"
+        "select.disabled=true;"
+        "};"
+        "const enableSelect=(devices)=>{"
+        "select.innerHTML='';"
+        "const placeholder=document.createElement('option');"
+        "placeholder.textContent='Select a device';"
+        "placeholder.value='';"
+        "placeholder.disabled=true;"
+        "placeholder.selected=true;"
+        "select.append(placeholder);"
+        "devices.forEach((name)=>{"
+        "const option=document.createElement('option');"
+        "option.value=name;"
+        "option.textContent=name;"
+        "select.append(option);"
+        "});"
+        "select.disabled=false;"
+        "};"
+        "const loadDevices=async()=>{"
+        "try{"
+        f"const response=await fetch({devices_endpoint});"
+        "if(!response.ok){throw new Error('Request failed');}"
+        "const payload=await response.json();"
+        "const devices=Array.isArray(payload.devices)?payload.devices:[];"
+        "if(devices.length===0){"
+        "setSingleOption('No devices found');"
+        "return;"
+        "}"
+        "enableSelect(devices);"
+        "}catch(error){"
+        "setSingleOption('Unable to load devices');"
+        "}"
+        "};"
+        "loadDevices();"
+        "})();</script>"
         "</section>"
     )
 
@@ -1082,6 +1146,23 @@ def create_app() -> FastAPI:
             app,
             heading=heading,
             active_section="blacklist",
+            content=content,
+            show_resource_form=False,
+        )
+
+    @app.get(
+        "/configure/settings",
+        response_class=HTMLResponse,
+        name="configure_settings",
+    )
+    async def configure_settings(request: Request) -> HTMLResponse:
+        devices_url = app.url_path_for("list_devices")
+        content = _settings_content(devices_url)
+        return _render_config_page(
+            request,
+            app,
+            heading="Application Settings",
+            active_section="settings",
             content=content,
             show_resource_form=False,
         )
