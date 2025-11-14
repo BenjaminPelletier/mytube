@@ -49,6 +49,38 @@ p.description {
   font-size: 0.95rem;
 }
 
+.now-playing .playback-controls {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.now-playing .playback-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 1.35rem;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.now-playing .playback-button:hover,
+.now-playing .playback-button:focus-visible {
+  background: #f5f5f5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.now-playing .playback-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  box-shadow: none;
+}
+
 .video-options {
   display: flex;
   flex-wrap: wrap;
