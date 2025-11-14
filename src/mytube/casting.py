@@ -8,6 +8,7 @@ from typing import Iterable, Optional
 
 import pychromecast
 from pychromecast.controllers.youtube import YouTubeController
+from pychromecast.error import RequestFailed
 
 
 _PLAYBACK_METHODS = {
@@ -94,7 +95,12 @@ def control_youtube_playback(action: str, *, device_name: str | None = None) -> 
             raise ChromecastUnavailableError(
                 f"Chromecast does not support '{method_name}' playback control."
             )
-        control_method()
+        try:
+            control_method()
+        except RequestFailed as exc:
+            raise ChromecastUnavailableError(
+                f"Chromecast rejected '{method_name}' playback control: {exc}"
+            ) from exc
 
         return device.name
     finally:

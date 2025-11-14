@@ -131,6 +131,7 @@ def _install_fastapi_stubs() -> None:
 
         controllers_module = types.ModuleType("pychromecast.controllers")
         youtube_module = types.ModuleType("pychromecast.controllers.youtube")
+        error_module = types.ModuleType("pychromecast.error")
 
         class _YouTubeController:  # pragma: no cover - stub
             def __init__(self):
@@ -141,9 +142,15 @@ def _install_fastapi_stubs() -> None:
 
         youtube_module.YouTubeController = _YouTubeController
 
+        class _RequestFailed(Exception):  # pragma: no cover - stub
+            pass
+
+        error_module.RequestFailed = _RequestFailed
+
         sys.modules["pychromecast"] = pychromecast_module
         sys.modules["pychromecast.controllers"] = controllers_module
         sys.modules["pychromecast.controllers.youtube"] = youtube_module
+        sys.modules["pychromecast.error"] = error_module
 
 
 _install_fastapi_stubs()
