@@ -148,9 +148,73 @@ def _install_fastapi_stubs() -> None:
             return {"paired": code}
 
         pairing_module.pair_link_code = _pair_link_code
+
+        exceptions_module = types.ModuleType("pyytlounge.exceptions")
+
+        class _LoungeError(RuntimeError):  # pragma: no cover - stub
+            pass
+
+        class _NotConnected(_LoungeError):  # pragma: no cover - stub
+            pass
+
+        class _NotLinked(_LoungeError):  # pragma: no cover - stub
+            pass
+
+        class _NotPaired(_LoungeError):  # pragma: no cover - stub
+            pass
+
+        exceptions_module.NotConnectedException = _NotConnected
+        exceptions_module.NotLinkedException = _NotLinked
+        exceptions_module.NotPairedException = _NotPaired
+
+        wrapper_module = types.ModuleType("pyytlounge.wrapper")
+
+        class _YtLoungeApi:  # pragma: no cover - stub
+            def __init__(self, name: str):
+                self._name = name
+                self._connected = False
+                self._auth_payload: dict[str, str] | None = None
+
+            async def __aenter__(self):  # pragma: no cover - stub
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):  # pragma: no cover - stub
+                await self.close()
+                return False
+
+            def load_auth_state(self, payload):  # pragma: no cover - stub
+                self._auth_payload = dict(payload)
+
+            async def connect(self):  # pragma: no cover - stub
+                self._connected = True
+                return True
+
+            async def refresh_auth(self):  # pragma: no cover - stub
+                self._connected = True
+                return True
+
+            def connected(self):  # pragma: no cover - stub
+                return self._connected
+
+            async def pair(self, code: str):  # pragma: no cover - stub
+                self._auth_payload = {"paired": code}
+                return True
+
+            def store_auth_state(self):  # pragma: no cover - stub
+                return self._auth_payload or {}
+
+            async def close(self):  # pragma: no cover - stub
+                self._connected = False
+
+        wrapper_module.YtLoungeApi = _YtLoungeApi
+
         pyytlounge_module.pairing = pairing_module
+        pyytlounge_module.YtLoungeApi = _YtLoungeApi
+
         sys.modules["pyytlounge"] = pyytlounge_module
         sys.modules["pyytlounge.pairing"] = pairing_module
+        sys.modules["pyytlounge.exceptions"] = exceptions_module
+        sys.modules["pyytlounge.wrapper"] = wrapper_module
 
 
 _install_fastapi_stubs()

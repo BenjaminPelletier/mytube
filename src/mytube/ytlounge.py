@@ -4,33 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import inspect
 import json
-import logging
 from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Iterable
+from typing import Any
 
-try:  # pragma: no cover - optional dependency
-    import pyytlounge  # type: ignore import
-except ModuleNotFoundError:  # pragma: no cover - tests provide a stub
-    pyytlounge = None  # type: ignore[assignment]
+from pyytlounge.wrapper import YtLoungeApi
 
-__all__ = ["PairingError", "pair_with_link_code"]
-
-
-logger = logging.getLogger(__name__)
+__all__ = ["PairingError", "pair_with_link_code", "dumps_auth_payload"]
 
 
 class PairingError(RuntimeError):
     """Raised when pairing with the YouTube app fails."""
-
-
-_PAIRING_CALLABLE_NAMES = (
-    "pair_link_code",
-    "pair_code",
-    "pair",
-    "pair_with_code",
-)
 
 
 def pair_with_link_code(link_code: str) -> dict[str, Any]:
@@ -40,113 +24,15 @@ def pair_with_link_code(link_code: str) -> dict[str, Any]:
     if not normalized_code:
         raise PairingError("Enter the full Link with TV code from your TV.")
 
-    module = pyytlounge
-    if module is None:
-        raise PairingError("pyytlounge is not available to complete pairing.")
+    async def _pair() -> Any:
+        async with YtLoungeApi("MyTube Remote") as api:
+            paired = await api.pair(normalized_code)
+            if not paired:
+                raise PairingError("Unable to pair with the YouTube app.")
+            payload = api.store_auth_state()
+            return _normalize_auth_payload(payload)
 
-    api_class = getattr(module, "YtLoungeApi", None)
-    if api_class is None:
-        wrapper = getattr(module, "wrapper", None)
-        if wrapper is not None:
-            api_class = getattr(wrapper, "YtLoungeApi", None)
-
-    if api_class is not None:
-        async def _pair() -> Any:
-            async with api_class("My Remote") as api:  # type: ignore[call-arg]
-                paired = await api.pair(normalized_code)
-                if not paired:
-                    raise PairingError("Unable to pair with the YouTube app.")
-                return api.store_auth_state()
-
-        return _normalize_auth_payload(asyncio.run(_pair()))
-
-    attempts: list[str] = []
-    for func, description in _collect_pairing_callables(module, attempts):
-        try:
-            result = _call_pairing(func, normalized_code)
-        except Exception as exc:  # pragma: no cover - diagnostics only
-            attempts.append(f"{description} raised {exc.__class__.__name__}: {exc}")
-            continue
-        return _normalize_auth_payload(result)
-
-    diagnostics: list[str] = []
-    version = getattr(module, "__version__", None)
-    if version:
-        diagnostics.append(f"pyytlounge version {version}")
-
-    pairing_module = getattr(module, "pairing", None)
-    if pairing_module is not None:
-        available = [
-            name
-            for name in dir(pairing_module)
-            if callable(getattr(pairing_module, name, None))
-        ]
-        if available:
-            diagnostics.append(
-                f"Available pairing callables: {', '.join(sorted(available))}"
-            )
-
-    diagnostics.extend(attempts)
-    detail = "; ".join(diagnostics)
-    if detail:
-        detail = f" {detail}"
-    raise PairingError(f"Unable to pair with the YouTube app.{detail}")
-
-
-def _collect_pairing_callables(
-    module: Any, attempts: list[str]
-) -> Iterable[tuple[Callable[[str], Any], str]]:
-    pairing_module = getattr(module, "pairing", None)
-    if pairing_module is not None:
-        client_factory = getattr(pairing_module, "PairingClient", None)
-        if callable(client_factory):
-            try:
-                client = client_factory()
-            except Exception as exc:  # pragma: no cover - diagnostics only
-                attempts.append(
-                    f"{_object_name(pairing_module)}.PairingClient raised {exc.__class__.__name__}: {exc}"
-                )
-            else:
-                for name in _PAIRING_CALLABLE_NAMES:
-                    func = getattr(client, name, None)
-                    if callable(func):
-                        yield func, f"{_object_name(pairing_module)}.PairingClient.{name}"
-        for name in _PAIRING_CALLABLE_NAMES:
-            func = getattr(pairing_module, name, None)
-            if callable(func):
-                yield func, f"{_object_name(pairing_module)}.{name}"
-
-    client_factory = getattr(module, "PairingClient", None)
-    if callable(client_factory):
-        try:
-            client = client_factory()
-        except Exception as exc:  # pragma: no cover - diagnostics only
-            attempts.append(
-                f"{_object_name(module)}.PairingClient raised {exc.__class__.__name__}: {exc}"
-            )
-        else:
-            for name in _PAIRING_CALLABLE_NAMES:
-                func = getattr(client, name, None)
-                if callable(func):
-                    yield func, f"{_object_name(module)}.PairingClient.{name}"
-
-    for name in _PAIRING_CALLABLE_NAMES:
-        func = getattr(module, name, None)
-        if callable(func):
-            yield func, f"{_object_name(module)}.{name}"
-
-
-def _call_pairing(func: Callable[[str], Any], code: str) -> Any:
-    result = func(code)
-    if inspect.isawaitable(result):
-        return asyncio.run(result)
-    return result
-
-
-def _object_name(obj: Any) -> str:
-    if hasattr(obj, "__name__"):
-        return getattr(obj, "__name__")  # type: ignore[return-value]
-    return obj.__class__.__name__
+    return asyncio.run(_pair())
 
 
 def _normalize_code(link_code: str) -> str:

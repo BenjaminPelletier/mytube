@@ -8,17 +8,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-try:  # pragma: no cover - optional dependency resolution
-    from pyytlounge.exceptions import NotConnectedException, NotLinkedException, NotPairedException
-except ModuleNotFoundError:  # pragma: no cover - fallback definitions for tests
-    class NotConnectedException(RuntimeError):
-        """Fallback error when pyytlounge is unavailable."""
-
-    class NotLinkedException(RuntimeError):
-        """Fallback error when pyytlounge is unavailable."""
-
-    class NotPairedException(RuntimeError):
-        """Fallback error when pyytlounge is unavailable."""
+from pyytlounge.exceptions import NotConnectedException, NotLinkedException, NotPairedException
+from pyytlounge.wrapper import YtLoungeApi
 
 from .ytlounge import PairingError
 
@@ -30,23 +21,6 @@ logger = logging.getLogger(__name__)
 _CONNECTION_RETRIES = 6
 _BASE_BACKOFF = 0.5
 _MAX_BACKOFF = 10.0
-
-_YT_LOUNGE_API_CLASS: type | None = None
-
-
-def _get_yt_lounge_api_class() -> type:
-    """Return the :class:`pyytlounge.wrapper.YtLoungeApi` class."""
-
-    global _YT_LOUNGE_API_CLASS
-    if _YT_LOUNGE_API_CLASS is None:
-        try:
-            from pyytlounge.wrapper import YtLoungeApi as api_class  # type: ignore import
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "pyytlounge is not available to manage lounge connections."
-            ) from exc
-        _YT_LOUNGE_API_CLASS = api_class
-    return _YT_LOUNGE_API_CLASS
 
 
 def normalize_link_code(link_code: str) -> str:
@@ -111,13 +85,13 @@ class LoungeController:
         self.name = name
         self._auth_state: dict[str, Any] | None = None
         self.screen_id: str | None = None
-        if auth_state is not None:
-            self._apply_auth_state(auth_state, loaded=False)
         self._api: Any | None = None
         self._api_has_auth = False
         self._lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
         self._ready = asyncio.Event()
+        if auth_state is not None:
+            self._apply_auth_state(auth_state, loaded=False)
 
     def _apply_auth_state(
         self,
@@ -146,8 +120,7 @@ class LoungeController:
     async def _ensure_api(self) -> Any:
         api = self._api
         if api is None:
-            api_class = _get_yt_lounge_api_class()
-            api = api_class(self.name)
+            api = YtLoungeApi(self.name)
             await api.__aenter__()
             self._api = api
             self._api_has_auth = False
