@@ -8,8 +8,17 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from pyytlounge.exceptions import NotConnectedException, NotLinkedException, NotPairedException
-from pyytlounge.wrapper import YtLoungeApi
+try:  # pragma: no cover - optional dependency resolution
+    from pyytlounge.exceptions import NotConnectedException, NotLinkedException, NotPairedException
+except ModuleNotFoundError:  # pragma: no cover - fallback definitions for tests
+    class NotConnectedException(RuntimeError):
+        """Fallback error when pyytlounge is unavailable."""
+
+    class NotLinkedException(RuntimeError):
+        """Fallback error when pyytlounge is unavailable."""
+
+    class NotPairedException(RuntimeError):
+        """Fallback error when pyytlounge is unavailable."""
 
 from .ytlounge import PairingError
 
@@ -21,6 +30,23 @@ logger = logging.getLogger(__name__)
 _CONNECTION_RETRIES = 6
 _BASE_BACKOFF = 0.5
 _MAX_BACKOFF = 10.0
+
+_YT_LOUNGE_API_CLASS: type | None = None
+
+
+def _get_yt_lounge_api_class() -> type:
+    """Return the :class:`pyytlounge.wrapper.YtLoungeApi` class."""
+
+    global _YT_LOUNGE_API_CLASS
+    if _YT_LOUNGE_API_CLASS is None:
+        try:
+            from pyytlounge.wrapper import YtLoungeApi as api_class  # type: ignore import
+        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "pyytlounge is not available to manage lounge connections."
+            ) from exc
+        _YT_LOUNGE_API_CLASS = api_class
+    return _YT_LOUNGE_API_CLASS
 
 
 def normalize_link_code(link_code: str) -> str:
@@ -77,92 +103,144 @@ def coerce_auth_state(auth_state: Mapping[str, Any] | str) -> dict[str, Any]:
 class LoungeController:
     """Wrap a single TV connection with locking & reconnects."""
 
-    def __init__(self, name: str, auth_state: Mapping[str, Any]):
+    def __init__(
+        self,
+        name: str,
+        auth_state: Mapping[str, Any] | str | None = None,
+    ) -> None:
         self.name = name
-        self._auth_state = coerce_auth_state(auth_state)
-        self.screen_id = self._auth_state["screenId"]
-        self._api: YtLoungeApi | None = None
+        self._auth_state: dict[str, Any] | None = None
+        self.screen_id: str | None = None
+        if auth_state is not None:
+            self._apply_auth_state(auth_state, loaded=False)
+        self._api: Any | None = None
+        self._api_has_auth = False
         self._lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
         self._ready = asyncio.Event()
 
-    async def _initialize_api(self) -> YtLoungeApi:
-        api = YtLoungeApi(self.name)
-        await api.__aenter__()
-        api.load_auth_state({
+    def _apply_auth_state(
+        self,
+        auth_state: Mapping[str, Any] | str,
+        *,
+        loaded: bool,
+    ) -> dict[str, Any]:
+        normalized = coerce_auth_state(auth_state)
+        self._auth_state = normalized
+        self.screen_id = normalized["screenId"]
+        self._api_has_auth = loaded
+        self._ready.clear()
+        return normalized
+
+    def _require_auth_state(self) -> dict[str, Any]:
+        if self._auth_state is None:
+            raise RuntimeError("TV is not paired with the YouTube app.")
+        return {
             "version": self._auth_state["version"],
             "screenId": self._auth_state["screenId"],
             "loungeIdToken": self._auth_state["loungeIdToken"],
             "refreshToken": self._auth_state.get("refreshToken"),
             "expiry": self._auth_state.get("expiry"),
-        })
+        }
+
+    async def _ensure_api(self) -> Any:
+        api = self._api
+        if api is None:
+            api_class = _get_yt_lounge_api_class()
+            api = api_class(self.name)
+            await api.__aenter__()
+            self._api = api
+            self._api_has_auth = False
         return api
 
     async def connect(self) -> None:
         """Idempotently establish a lounge connection with backoff."""
 
         async with self._connect_lock:
-            if self._api and self._api.connected():
+            api = await self._ensure_api()
+            auth_payload = self._require_auth_state()
+            if not self._api_has_auth:
+                api.load_auth_state(auth_payload)
+                self._api_has_auth = True
+            if api.connected():
+                self._ready.set()
                 return
 
             last_error: Exception | None = None
             for attempt in range(_CONNECTION_RETRIES):
-                api: YtLoungeApi | None = None
                 try:
-                    api = await self._initialize_api()
-                    if not await api.connect():
-                        await api.refresh_auth()
-                        if not await api.connect():
-                            raise RuntimeError("Unable to connect to TV YouTube app")
-
-                    self._api = api
-                    self._ready.set()
-                    return
+                    connected = await api.connect()
                 except (NotLinkedException, NotPairedException, NotConnectedException) as exc:
                     last_error = exc
-                    logger.warning("YouTube Lounge connection lost for %s: %s", self.screen_id, exc)
-                except Exception as exc:  # pragma: no cover - defensive
-                    last_error = exc
-                    logger.exception("Unexpected error while connecting to YouTube lounge")
-                finally:
-                    if self._api is not api and api is not None:
-                        try:
-                            await api.close()
-                        except Exception:  # pragma: no cover - best effort cleanup
-                            pass
-
+                    logger.warning(
+                        "YouTube Lounge connection failed for %s: %s",
+                        self.screen_id or "unknown screen",
+                        exc,
+                    )
+                else:
+                    if connected:
+                        self._ready.set()
+                        return
+                    try:
+                        await api.refresh_auth()
+                    except (NotLinkedException, NotPairedException, NotConnectedException) as exc:
+                        last_error = exc
+                        logger.warning(
+                            "Refreshing YouTube Lounge auth failed for %s: %s",
+                            self.screen_id or "unknown screen",
+                            exc,
+                        )
                 backoff = min(_BASE_BACKOFF * (2**attempt), _MAX_BACKOFF)
                 await asyncio.sleep(backoff)
 
             self._ready.clear()
-            self._api = None
-            if last_error is None:
-                raise RuntimeError("Unable to connect to TV YouTube app")
             raise RuntimeError("Unable to connect to TV YouTube app") from last_error
 
     async def ensure_connected(self) -> None:
-        if not self._api or not self._api.connected():
-            await self.connect()
+        await self.connect()
 
     async def close(self) -> None:
         api, self._api = self._api, None
+        self._api_has_auth = False
         self._ready.clear()
         if api is not None:
             try:
                 await api.close()
+            except asyncio.CancelledError:  # pragma: no cover - propagate cancellations
+                raise
             except Exception:  # pragma: no cover - best effort cleanup
-                logger.exception("Error while closing lounge connection")
+                logger.warning("Error while closing lounge connection", exc_info=True)
 
-    async def update_auth(self, auth_state: Mapping[str, Any], *, name: str | None = None) -> None:
+    async def update_auth(
+        self,
+        auth_state: Mapping[str, Any] | str,
+        *,
+        name: str | None = None,
+    ) -> None:
         """Replace stored authentication data and reset the connection."""
 
-        new_state = coerce_auth_state(auth_state)
         async with self._lock:
             if name:
                 self.name = name
-            self._auth_state = new_state
-            self.screen_id = new_state["screenId"]
+            self._apply_auth_state(auth_state, loaded=False)
             await self.close()
+
+    async def pair_with_code(self, link_code: str) -> dict[str, Any]:
+        """Pair this controller with the YouTube TV app."""
+
+        normalized_code = normalize_link_code(link_code)
+        if not normalized_code:
+            raise PairingError("Enter the full Link with TV code from your TV.")
+
+        async with self._lock:
+            api = await self._ensure_api()
+            paired = await api.pair(normalized_code)
+            if not paired:
+                raise PairingError("Unable to pair with the YouTube app.")
+            payload = api.store_auth_state()
+            normalized_payload = self._apply_auth_state(payload, loaded=True)
+        await self.connect()
+        return normalized_payload
 
     async def get_status(self) -> dict[str, Any]:
         """Return connection information about the controller."""
@@ -173,23 +251,23 @@ class LoungeController:
             "connected": False,
         }
 
+        if self._auth_state is None:
+            status["error"] = "TV is not paired with the YouTube app."
+            return status
+
         try:
             await self.ensure_connected()
-            api = self._api
-            if api is None:
-                return status
-            status["connected"] = api.connected()
-            try:
-                status["screen_name"] = api.screen_name
-            except Exception:  # pragma: no cover - attribute access best effort
-                status["screen_name"] = None
-            try:
-                status["device_name"] = api.screen_device_name
-            except Exception:  # pragma: no cover - attribute access best effort
-                status["device_name"] = None
-        except Exception as exc:
+        except (RuntimeError, NotConnectedException, NotLinkedException, NotPairedException) as exc:
             status["error"] = str(exc)
-            await self.close()
+            return status
+
+        api = self._api
+        if api is None:
+            return status
+
+        status["connected"] = api.connected()
+        status["screen_name"] = getattr(api, "screen_name", None)
+        status["device_name"] = getattr(api, "screen_device_name", None)
         return status
 
 
@@ -207,26 +285,19 @@ class LoungeManager:
 
     async def upsert_from_auth(
         self,
-        auth_state: Mapping[str, Any],
+        auth_state: Mapping[str, Any] | str,
         *,
         name: str | None = None,
     ) -> LoungeController:
         normalized = coerce_auth_state(auth_state)
         screen_id = normalized["screenId"]
-        controller: LoungeController | None = None
-        created = False
         async with self._lock:
             controller = self._controllers.get(screen_id)
             if controller is None:
                 controller = LoungeController(name or self._default_name, normalized)
                 self._controllers[screen_id] = controller
-                created = True
-
-        if controller is None:  # pragma: no cover - defensive
-            raise RuntimeError("Unable to create lounge controller")
-
-        if not created:
-            await controller.update_auth(normalized, name=name)
+            else:
+                await controller.update_auth(normalized, name=name)
         await controller.ensure_connected()
         return controller
 
@@ -236,25 +307,26 @@ class LoungeManager:
         *,
         name: str | None = None,
     ) -> dict[str, Any]:
-        normalized_code = normalize_link_code(link_code)
-        if not normalized_code:
-            raise PairingError("Enter the full Link with TV code from your TV.")
+        controller = LoungeController(name or self._default_name)
+        payload = await controller.pair_with_code(link_code)
+        screen_id = controller.screen_id
+        if not screen_id:  # pragma: no cover - defensive
+            raise PairingError("Unable to determine screen identifier from pairing response.")
 
-        device_name = name or self._default_name
-        async with YtLoungeApi(device_name) as api:
-            paired = await api.pair(normalized_code)
-            if not paired:
-                raise PairingError("Unable to pair with the YouTube app.")
-            payload = api.store_auth_state()
-
-        await self.upsert_from_auth(payload, name=device_name)
+        async with self._lock:
+            existing = self._controllers.get(screen_id)
+            if existing is None:
+                self._controllers[screen_id] = controller
+            else:
+                await existing.update_auth(payload, name=name)
+                await controller.close()
+                controller = existing
+        await controller.ensure_connected()
         return payload
 
     async def shutdown(self) -> None:
-        controllers: list[LoungeController]
         async with self._lock:
             controllers = list(self._controllers.values())
             self._controllers.clear()
 
         await asyncio.gather(*(controller.close() for controller in controllers), return_exceptions=True)
-

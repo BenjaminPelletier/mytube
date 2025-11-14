@@ -697,9 +697,10 @@ def create_app() -> FastAPI:
             return
         try:
             await lounge_manager.upsert_from_auth(auth_state, name=LOUNGE_REMOTE_NAME)
-        except Exception:  # pragma: no cover - best effort startup
+        except (PairingError, RuntimeError, ValueError) as exc:  # pragma: no cover - best effort startup
             logger.warning(
-                "Unable to connect to the paired YouTube TV during startup.",
+                "Unable to connect to the paired YouTube TV during startup: %s",
+                exc,
                 exc_info=True,
             )
 
@@ -925,10 +926,11 @@ def create_app() -> FastAPI:
                     )
                 if controller is not None:
                     lounge_status = await controller.get_status()
-            except Exception as exc:  # pragma: no cover - best effort status
+            except (PairingError, RuntimeError, ValueError) as exc:  # pragma: no cover - best effort status
                 logger.warning(
-                    "Unable to retrieve YouTube TV status for screen %s.",
+                    "Unable to retrieve YouTube TV status for screen %s: %s",
                     screen_id,
+                    exc,
                     exc_info=True,
                 )
                 lounge_status = {
@@ -1006,8 +1008,8 @@ def create_app() -> FastAPI:
             )
         except PairingError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("Unexpected error while pairing with YouTube app")
+        except (RuntimeError, ValueError) as exc:  # pragma: no cover - defensive
+            logger.exception("Unexpected error while pairing with YouTube app: %s", exc)
             raise HTTPException(
                 status_code=502,
                 detail="Unable to pair with the YouTube app.",
