@@ -13,6 +13,10 @@
       <img class="thumbnail" alt="" hidden>
       <p class="title" hidden></p>
       <p class="status-message" hidden></p>
+      <div class="playback-controls" hidden>
+        <button type="button" class="playback-button resume-button" aria-label="Resume video">▶</button>
+        <button type="button" class="playback-button pause-button" aria-label="Pause video">⏸</button>
+      </div>
     </section>
     <section class="video-options" aria-live="polite"></section>
     <button id="refresh-videos" class="video-refresh" type="button" aria-label="Load new videos" hidden>🗘</button>
@@ -26,8 +30,32 @@
         const nowPlayingTitle = nowPlayingSection ? nowPlayingSection.querySelector(".title") : null;
         const nowPlayingThumbnail = nowPlayingSection ? nowPlayingSection.querySelector(".thumbnail") : null;
         const nowPlayingStatus = nowPlayingSection ? nowPlayingSection.querySelector(".status-message") : null;
+        const nowPlayingControls = nowPlayingSection ? nowPlayingSection.querySelector(".playback-controls") : null;
+        const pauseButton = nowPlayingSection ? nowPlayingSection.querySelector(".pause-button") : null;
+        const resumeButton = nowPlayingSection ? nowPlayingSection.querySelector(".resume-button") : null;
         const videosApiUrl = "{{ videos_api_url }}";
         const playApiUrl = "{{ play_api_url }}";
+        const pauseApiUrl = "{{ pause_api_url }}";
+        const resumeApiUrl = "{{ resume_api_url }}";
+
+        const playbackButtons = [];
+        if (pauseButton instanceof HTMLButtonElement) {
+          playbackButtons.push(pauseButton);
+        }
+        if (resumeButton instanceof HTMLButtonElement) {
+          playbackButtons.push(resumeButton);
+        }
+
+        const setPlaybackControlsDisabled = (isDisabled) => {
+          playbackButtons.forEach((button) => {
+            button.disabled = Boolean(isDisabled);
+            if (isDisabled) {
+              button.setAttribute("aria-busy", "true");
+            } else {
+              button.removeAttribute("aria-busy");
+            }
+          });
+        };
 
         if (!videoContainer || !videosApiUrl) {
           return;
@@ -44,6 +72,10 @@
 
           nowPlayingSection.hidden = false;
           nowPlayingSection.dataset.videoId = videoId;
+
+          if (nowPlayingControls) {
+            nowPlayingControls.hidden = !videoId;
+          }
 
           if (nowPlayingTitle) {
             if (title) {
@@ -90,6 +122,7 @@
           } else {
             nowPlayingSection.removeAttribute("aria-busy");
           }
+          setPlaybackControlsDisabled(isBusy);
         };
 
         const extractErrorMessage = (payload, fallback) => {
@@ -100,6 +133,46 @@
             }
           }
           return fallback;
+        };
+
+        const handlePlaybackControl = async (apiUrl, pendingMessage, fallbackMessage) => {
+          if (!apiUrl) {
+            return;
+          }
+
+          setNowPlayingStatus(pendingMessage);
+          setNowPlayingBusy(true);
+
+          try {
+            const response = await fetch(apiUrl, {
+              method: "POST",
+              headers: { Accept: "application/json" },
+            });
+
+            let payload = null;
+            try {
+              payload = await response.json();
+            } catch (error) {
+              payload = null;
+            }
+
+            if (!response.ok) {
+              const message = extractErrorMessage(
+                payload,
+                response.statusText || fallbackMessage
+              );
+              setNowPlayingStatus(message || fallbackMessage);
+              return;
+            }
+
+            setNowPlayingStatus("");
+          } catch (error) {
+            const message = error instanceof Error ? error.message : fallbackMessage;
+            setNowPlayingStatus(message);
+            console.error(error);
+          } finally {
+            setNowPlayingBusy(false);
+          }
         };
 
         const handlePlayVideo = async (event) => {
@@ -184,6 +257,28 @@
             setNowPlayingBusy(false);
           }
         };
+
+        if (pauseButton instanceof HTMLButtonElement) {
+          pauseButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            void handlePlaybackControl(
+              pauseApiUrl,
+              "Pausing...",
+              "Unable to pause playback."
+            );
+          });
+        }
+
+        if (resumeButton instanceof HTMLButtonElement) {
+          resumeButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            void handlePlaybackControl(
+              resumeApiUrl,
+              "Resuming...",
+              "Unable to resume playback."
+            );
+          });
+        }
 
         const setLoadingState = (isLoading) => {
           if (refreshButton) {

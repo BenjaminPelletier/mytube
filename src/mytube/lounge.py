@@ -242,6 +242,38 @@ class LoungeController:
             if inspect.isawaitable(result):
                 await result
 
+    async def pause(self) -> None:
+        """Pause playback on the connected screen."""
+
+        async with self._lock:
+            await self.ensure_connected()
+            api = await self._ensure_api()
+            pause_method = getattr(api, "pause", None)
+            if pause_method is None:
+                raise RuntimeError(
+                    "YouTube TV connection does not support pausing playback."
+                )
+
+            result = pause_method()
+            if inspect.isawaitable(result):
+                await result
+
+    async def resume(self) -> None:
+        """Resume playback on the connected screen."""
+
+        async with self._lock:
+            await self.ensure_connected()
+            api = await self._ensure_api()
+            resume_method = getattr(api, "play", None)
+            if resume_method is None:
+                raise RuntimeError(
+                    "YouTube TV connection does not support resuming playback."
+                )
+
+            result = resume_method()
+            if inspect.isawaitable(result):
+                await result
+
     async def get_status(self) -> dict[str, Any]:
         """Return connection information about the controller."""
 

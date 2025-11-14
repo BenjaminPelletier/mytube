@@ -710,6 +710,8 @@ def create_app() -> FastAPI:
                 "request": request,
                 "videos_api_url": app.url_path_for("list_random_videos"),
                 "play_api_url": app.url_path_for("play_video"),
+                "pause_api_url": app.url_path_for("pause_video"),
+                "resume_api_url": app.url_path_for("resume_video"),
             },
         )
 
@@ -848,6 +850,114 @@ def create_app() -> FastAPI:
             }
 
         return {"playing": playing_context}
+
+    @app.post("/lounge/pause", name="pause_video")
+    async def pause_video_handler(request: Request) -> dict[str, Any]:
+        lounge_manager_dep = getattr(request.app.state, "lounge", None)
+        if not isinstance(lounge_manager_dep, LoungeManager):
+            raise HTTPException(
+                status_code=503,
+                detail="TV lounge controller is not available.",
+            )
+
+        settings = await run_in_threadpool(fetch_settings, ["youtube_app_auth"])
+        auth_state = _load_lounge_auth(settings)
+        if not auth_state:
+            raise HTTPException(
+                status_code=503,
+                detail="TV is not paired with the YouTube app.",
+            )
+
+        screen_id = auth_state.get("screenId")
+        if not isinstance(screen_id, str) or not screen_id:
+            raise HTTPException(
+                status_code=503,
+                detail="TV is not paired with the YouTube app.",
+            )
+
+        try:
+            controller = await lounge_manager_dep.get(screen_id)
+            if controller is None:
+                controller = await lounge_manager_dep.upsert_from_auth(
+                    auth_state, name=LOUNGE_REMOTE_NAME
+                )
+            await controller.pause()
+        except HTTPException:
+            raise
+        except (PairingError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Unable to pause playback on screen %s: %s",
+                screen_id,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(
+                "Unexpected error while attempting to pause playback on screen %s: %s",
+                screen_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to pause playback on the YouTube app.",
+            ) from exc
+
+        return {"status": "paused"}
+
+    @app.post("/lounge/resume", name="resume_video")
+    async def resume_video_handler(request: Request) -> dict[str, Any]:
+        lounge_manager_dep = getattr(request.app.state, "lounge", None)
+        if not isinstance(lounge_manager_dep, LoungeManager):
+            raise HTTPException(
+                status_code=503,
+                detail="TV lounge controller is not available.",
+            )
+
+        settings = await run_in_threadpool(fetch_settings, ["youtube_app_auth"])
+        auth_state = _load_lounge_auth(settings)
+        if not auth_state:
+            raise HTTPException(
+                status_code=503,
+                detail="TV is not paired with the YouTube app.",
+            )
+
+        screen_id = auth_state.get("screenId")
+        if not isinstance(screen_id, str) or not screen_id:
+            raise HTTPException(
+                status_code=503,
+                detail="TV is not paired with the YouTube app.",
+            )
+
+        try:
+            controller = await lounge_manager_dep.get(screen_id)
+            if controller is None:
+                controller = await lounge_manager_dep.upsert_from_auth(
+                    auth_state, name=LOUNGE_REMOTE_NAME
+                )
+            await controller.resume()
+        except HTTPException:
+            raise
+        except (PairingError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Unable to resume playback on screen %s: %s",
+                screen_id,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(
+                "Unexpected error while attempting to resume playback on screen %s: %s",
+                screen_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to resume playback on the YouTube app.",
+            ) from exc
+
+        return {"status": "playing"}
 
     @app.get("/configure", response_class=HTMLResponse)
     async def configure_home(request: Request) -> HTMLResponse:
