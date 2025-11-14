@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -847,6 +848,31 @@ def _select_thumbnail_url(raw_video: Any, desired_width: int = 320) -> str | Non
     return fallback_url
 
 
+async def _load_video_record(video_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Fetch a video record, refreshing it from YouTube if needed."""
+
+    video_record = await run_in_threadpool(fetch_video, video_id)
+    if video_record and video_record.get("raw_json"):
+        return video_record, None
+
+    api_key = load_youtube_api_key()
+    _, payload = await fetch_youtube_videos(video_id, api_key)
+    items = payload.get("items") or []
+    if not items:
+        return None, "No video information available for that ID."
+
+    video = items[0]
+    await run_in_threadpool(
+        save_video,
+        video,
+        retrieved_at=datetime.now(timezone.utc),
+    )
+    refreshed_record = await run_in_threadpool(fetch_video, video_id)
+    if refreshed_record and refreshed_record.get("raw_json"):
+        return refreshed_record, None
+    return refreshed_record, "Unable to load video details."
+
+
 def _build_playing_context(video_record: dict[str, Any], video_id: str) -> dict[str, str | None]:
     title = video_record.get("title") or video_id
     raw_payload = video_record.get("raw_json")
@@ -871,6 +897,7 @@ def create_app() -> FastAPI:
         request: Request,
         status: str | None = None,
         playing: dict[str, str | None] | None = None,
+        videos: list[dict[str, str | None]] | None = None,
     ) -> HTMLResponse:
         return templates.TemplateResponse(
             "home.html",
@@ -880,6 +907,7 @@ def create_app() -> FastAPI:
                 "devices_url": app.url_path_for("list_devices"),
                 "status": status,
                 "playing": playing,
+                "videos": videos or [],
             },
         )
 
@@ -889,35 +917,59 @@ def create_app() -> FastAPI:
     ) -> HTMLResponse:
         playing_video: dict[str, str | None] | None = None
         status_message: str | None = None
+        video_options: list[dict[str, str | None]] = []
 
         if playing:
             video_id = playing.strip()
             if video_id:
-                video_record = await run_in_threadpool(fetch_video, video_id)
-                needs_refresh = not video_record or not video_record.get("raw_json")
-
-                if needs_refresh:
-                    api_key = load_youtube_api_key()
-                    _, payload = await fetch_youtube_videos(video_id, api_key)
-                    items = payload.get("items") or []
-                    if items:
-                        video = items[0]
-                        await run_in_threadpool(
-                            save_video,
-                            video,
-                            retrieved_at=datetime.now(timezone.utc),
-                        )
-                        video_record = await run_in_threadpool(fetch_video, video_id)
-                    else:
-                        status_message = "No video information available for that ID."
-                        video_record = None
+                video_record, load_error = await _load_video_record(video_id)
 
                 if video_record and video_record.get("raw_json"):
                     playing_video = _build_playing_context(video_record, video_id)
+                elif load_error:
+                    status_message = load_error
                 elif not status_message:
                     status_message = "Unable to load video details."
 
-        return _render(request, status=status_message, playing=playing_video)
+        listed_videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
+        approved_videos = [
+            video
+            for video in listed_videos
+            if video.get("video_id") and not video.get("blacklisted_by")
+        ]
+        random.shuffle(approved_videos)
+
+        for entry in approved_videos:
+            if len(video_options) >= 5:
+                break
+            video_id = entry.get("video_id")
+            if not video_id:
+                continue
+
+            video_record, _ = await _load_video_record(video_id)
+            if not video_record or not video_record.get("raw_json"):
+                continue
+
+            thumbnail_url = _select_thumbnail_url(video_record.get("raw_json"))
+            if not thumbnail_url:
+                continue
+
+            title = video_record.get("title") or entry.get("title") or video_id
+            video_options.append(
+                {
+                    "video_id": video_id,
+                    "title": title,
+                    "thumbnail_url": thumbnail_url,
+                    "cast_url": app.url_path_for("cast_video", video_id=video_id),
+                }
+            )
+
+        return _render(
+            request,
+            status=status_message,
+            playing=playing_video,
+            videos=video_options,
+        )
 
     @app.get("/configure", response_class=HTMLResponse)
     async def configure_home(request: Request) -> HTMLResponse:
@@ -1419,6 +1471,30 @@ def create_app() -> FastAPI:
     async def list_devices() -> dict[str, list[str]]:
         devices = await run_in_threadpool(discover_chromecast_names)
         return {"devices": devices}
+
+    @app.get("/cast/video/{video_id}", response_class=HTMLResponse)
+    async def cast_video(
+        request: Request, video_id: str, device: str | None = None
+    ) -> Response:
+        try:
+            result: CastResult = await run_in_threadpool(
+                cast_youtube_video, video_id, device_name=device
+            )
+        except ChromecastUnavailableError as exc:  # pragma: no cover - hardware required
+            logger.warning("Chromecast unavailable: %s", exc)
+            return _render(request, str(exc))
+
+        status = (
+            "Casting YouTube video "
+            f"https://youtu.be/{result.video_id} to Chromecast '{result.device_name}'."
+        )
+        logger.info("%s", status)
+
+        redirect_url = app.url_path_for("home")
+        playing_param = quote(result.video_id, safe="")
+        return RedirectResponse(
+            url=f"{redirect_url}?playing={playing_param}", status_code=303
+        )
 
     @app.get("/cast", response_class=HTMLResponse)
     async def cast_featured(request: Request, device: str | None = None) -> HTMLResponse:

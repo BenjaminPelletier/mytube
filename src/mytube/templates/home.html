@@ -17,9 +17,18 @@
       <p class="title">{{ playing.title }}</p>
     </section>
     {% endif %}
-    <ul>
-      <li><a id="cast-link" href="{{ cast_url }}">Play the featured video</a></li>
-    </ul>
+    {% if videos %}
+    <section class="video-options">
+      {% for video in videos %}
+      <a class="video-option" href="{{ video.cast_url }}" data-cast-url="{{ video.cast_url }}">
+        <img class="video-thumbnail" src="{{ video.thumbnail_url }}" alt="Thumbnail for {{ video.title }}" width="320">
+        <span class="video-title">{{ video.title }}</span>
+      </a>
+      {% endfor %}
+    </section>
+    {% else %}
+    <p class="empty-state">No approved videos are available to cast.</p>
+    {% endif %}
     {% if status %}
     <p class="status">{{ status }}</p>
     {% endif %}
@@ -33,14 +42,15 @@
     </div>
     <script>
       (() => {
-        const castLink = document.getElementById("cast-link");
-        if (!castLink) {
+        const videoOptions = Array.from(document.querySelectorAll(".video-option"));
+        if (!videoOptions.length) {
           return;
         }
 
         const modal = document.getElementById("device-modal");
         const deviceList = document.getElementById("device-list");
         const cancelButton = document.getElementById("device-cancel");
+        let activeCastUrl = "";
 
         const hideModal = () => {
           if (!modal) {
@@ -50,10 +60,14 @@
           if (deviceList) {
             deviceList.innerHTML = "";
           }
+          activeCastUrl = "";
         };
 
-        const redirectToCast = (device) => {
-          const url = new URL(castLink.href, window.location.origin);
+        const redirectToCast = (targetUrl, device) => {
+          if (!targetUrl) {
+            return;
+          }
+          const url = new URL(targetUrl, window.location.origin);
           if (device) {
             url.searchParams.set("device", device);
           }
@@ -62,7 +76,7 @@
 
         const showModal = (devices) => {
           if (!modal || !deviceList) {
-            redirectToCast();
+            redirectToCast(activeCastUrl);
             return;
           }
           deviceList.innerHTML = "";
@@ -73,7 +87,7 @@
             button.textContent = device;
             button.addEventListener("click", () => {
               hideModal();
-              redirectToCast(device);
+              redirectToCast(activeCastUrl, device);
             });
             item.appendChild(button);
             deviceList.appendChild(item);
@@ -81,8 +95,17 @@
           modal.classList.remove("hidden");
         };
 
-        castLink.addEventListener("click", async (event) => {
+        const handleCastClick = async (event) => {
           event.preventDefault();
+          const option = event.currentTarget;
+          if (!(option instanceof HTMLElement)) {
+            return;
+          }
+          const targetUrl = option.getAttribute("data-cast-url") || option.getAttribute("href");
+          if (!targetUrl) {
+            return;
+          }
+          activeCastUrl = targetUrl;
           try {
             const response = await fetch("{{ devices_url }}");
             if (!response.ok) {
@@ -91,14 +114,20 @@
             const payload = await response.json();
             const devices = Array.isArray(payload.devices) ? payload.devices : [];
             if (devices.length <= 1) {
-              redirectToCast(devices[0]);
+              hideModal();
+              redirectToCast(activeCastUrl, devices[0]);
               return;
             }
             showModal(devices);
           } catch (error) {
             console.error(error);
-            redirectToCast();
+            hideModal();
+            redirectToCast(activeCastUrl);
           }
+        };
+
+        videoOptions.forEach((option) => {
+          option.addEventListener("click", handleCastClick);
         });
 
         if (cancelButton) {

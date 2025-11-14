@@ -42,8 +42,46 @@ p.description {
   color: #111;
 }
 
-ul {
-  padding-left: 1.2rem;
+.video-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.video-option {
+  display: inline-block;
+  width: min(320px, 100%);
+  text-decoration: none;
+  color: inherit;
+}
+
+.video-option .video-thumbnail {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.video-option .video-title {
+  display: block;
+  margin-top: 0.5rem;
+  font-weight: 600;
+  color: #111;
+  word-wrap: break-word;
+}
+
+.video-option:hover .video-thumbnail,
+.video-option:focus-visible .video-thumbnail {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+}
+
+.empty-state {
+  margin: 1.5rem 0;
+  color: #444;
 }
 
 .status {
