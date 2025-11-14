@@ -703,48 +703,19 @@ def create_app() -> FastAPI:
     if static_directory.exists():
         app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
-    def _render(
-        request: Request,
-        status: str | None = None,
-        playing: dict[str, str | None] | None = None,
-        videos: list[dict[str, str | None]] | None = None,
-    ) -> HTMLResponse:
+    def _render(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             "home.html",
             {
                 "request": request,
                 "videos_api_url": app.url_path_for("list_random_videos"),
-                "status": status,
-                "playing": playing,
-                "videos": videos or [],
+                "play_api_url": app.url_path_for("play_video"),
             },
         )
 
     @app.get("/", response_class=HTMLResponse)
-    async def home(
-        request: Request, playing: str | None = Query(default=None, min_length=1)
-    ) -> HTMLResponse:
-        playing_video: dict[str, str | None] | None = None
-        status_message: str | None = None
-
-        if playing:
-            video_id = playing.strip()
-            if video_id:
-                video_record, load_error = await _load_video_record(video_id)
-
-                if video_record and video_record.get("raw_json"):
-                    playing_video = _build_playing_context(video_record, video_id)
-                elif load_error:
-                    status_message = load_error
-                elif not status_message:
-                    status_message = "Unable to load video details."
-
-        return _render(
-            request,
-            status=status_message,
-            playing=playing_video,
-            videos=[],
-        )
+    async def home(request: Request) -> HTMLResponse:
+        return _render(request)
 
     async def _random_video_options(limit: int = 5) -> list[dict[str, str | None]]:
         if limit <= 0:
@@ -794,6 +765,89 @@ def create_app() -> FastAPI:
 
         videos = await _random_video_options(limit=limit)
         return {"videos": videos}
+
+    @app.post("/lounge/play", name="play_video")
+    async def play_video_handler(request: Request) -> dict[str, Any]:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=400, detail="Invalid JSON payload.") from exc
+
+        video_id: str = ""
+        if isinstance(payload, Mapping):
+            raw_video_id = payload.get("video_id")
+            if isinstance(raw_video_id, str):
+                video_id = raw_video_id.strip()
+            elif raw_video_id is not None:
+                video_id = str(raw_video_id).strip()
+
+        if not video_id:
+            raise HTTPException(status_code=400, detail="Video ID is required.")
+
+        lounge_manager_dep = getattr(request.app.state, "lounge", None)
+        if not isinstance(lounge_manager_dep, LoungeManager):
+            raise HTTPException(
+                status_code=503,
+                detail="TV lounge controller is not available.",
+            )
+
+        settings = await run_in_threadpool(fetch_settings, ["youtube_app_auth"])
+        auth_state = _load_lounge_auth(settings)
+        if not auth_state:
+            raise HTTPException(
+                status_code=503,
+                detail="TV is not paired with the YouTube app.",
+            )
+
+        screen_id = auth_state.get("screenId")
+        if not isinstance(screen_id, str) or not screen_id:
+            raise HTTPException(
+                status_code=503,
+                detail="TV is not paired with the YouTube app.",
+            )
+
+        try:
+            controller = await lounge_manager_dep.get(screen_id)
+            if controller is None:
+                controller = await lounge_manager_dep.upsert_from_auth(
+                    auth_state, name=LOUNGE_REMOTE_NAME
+                )
+            await controller.play_video(video_id)
+        except HTTPException:
+            raise
+        except (PairingError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Unable to start playback for video %s on screen %s: %s",
+                video_id,
+                screen_id,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(
+                "Unexpected error while attempting to play %s on screen %s: %s",
+                video_id,
+                screen_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to start playback on the YouTube app.",
+            ) from exc
+
+        video_record, _ = await _load_video_record(video_id)
+        playing_context: dict[str, str | None]
+        if video_record and video_record.get("raw_json"):
+            playing_context = _build_playing_context(video_record, video_id)
+        else:
+            playing_context = {
+                "title": video_id,
+                "thumbnail_url": None,
+                "video_id": video_id,
+            }
+
+        return {"playing": playing_context}
 
     @app.get("/configure", response_class=HTMLResponse)
     async def configure_home(request: Request) -> HTMLResponse:

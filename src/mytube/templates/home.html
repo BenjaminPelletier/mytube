@@ -8,33 +8,181 @@
   <body>
     <h1>MyTube Remote</h1>
     <p class="description">Kick off the featured recommendation on your Chromecast.</p>
-    {% if playing %}
-    <section class="now-playing">
+    <section class="now-playing" aria-live="polite" hidden>
       <p class="caption">Playing:</p>
-      {% if playing.thumbnail_url %}
-      <img class="thumbnail" src="{{ playing.thumbnail_url }}" alt="Thumbnail for {{ playing.title }}">
-      {% endif %}
-      <p class="title">{{ playing.title }}</p>
+      <img class="thumbnail" alt="" hidden>
+      <p class="title" hidden></p>
+      <p class="status-message" hidden></p>
     </section>
-    {% endif %}
     <section class="video-options" aria-live="polite"></section>
     <button id="refresh-videos" class="video-refresh" type="button" aria-label="Load new videos" hidden>🗘</button>
     <p class="empty-state" id="video-empty">Loading videos…</p>
-    {% if status %}
-    <p class="status">{{ status }}</p>
-    {% endif %}
     <script>
       (() => {
         const videoContainer = document.querySelector(".video-options");
         const refreshButton = document.getElementById("refresh-videos");
         const emptyState = document.getElementById("video-empty");
+        const nowPlayingSection = document.querySelector(".now-playing");
+        const nowPlayingTitle = nowPlayingSection ? nowPlayingSection.querySelector(".title") : null;
+        const nowPlayingThumbnail = nowPlayingSection ? nowPlayingSection.querySelector(".thumbnail") : null;
+        const nowPlayingStatus = nowPlayingSection ? nowPlayingSection.querySelector(".status-message") : null;
         const videosApiUrl = "{{ videos_api_url }}";
+        const playApiUrl = "{{ play_api_url }}";
+
         if (!videoContainer || !videosApiUrl) {
           return;
         }
 
+        const applyNowPlayingDetails = (details = {}) => {
+          if (!nowPlayingSection) {
+            return;
+          }
+
+          const title = typeof details.title === "string" ? details.title : "";
+          const thumbnailUrl = typeof details.thumbnail_url === "string" ? details.thumbnail_url : "";
+          const videoId = typeof details.video_id === "string" ? details.video_id : "";
+
+          nowPlayingSection.hidden = false;
+          nowPlayingSection.dataset.videoId = videoId;
+
+          if (nowPlayingTitle) {
+            if (title) {
+              nowPlayingTitle.textContent = title;
+              nowPlayingTitle.hidden = false;
+            } else {
+              nowPlayingTitle.textContent = "";
+              nowPlayingTitle.hidden = true;
+            }
+          }
+
+          if (nowPlayingThumbnail) {
+            if (thumbnailUrl) {
+              nowPlayingThumbnail.src = thumbnailUrl;
+              nowPlayingThumbnail.alt = title ? `Thumbnail for ${title}` : "Thumbnail";
+              nowPlayingThumbnail.hidden = false;
+            } else {
+              nowPlayingThumbnail.removeAttribute("src");
+              nowPlayingThumbnail.alt = "";
+              nowPlayingThumbnail.hidden = true;
+            }
+          }
+        };
+
+        const setNowPlayingStatus = (message) => {
+          if (!nowPlayingStatus) {
+            return;
+          }
+          if (message) {
+            nowPlayingStatus.textContent = message;
+            nowPlayingStatus.hidden = false;
+          } else {
+            nowPlayingStatus.textContent = "";
+            nowPlayingStatus.hidden = true;
+          }
+        };
+
+        const setNowPlayingBusy = (isBusy) => {
+          if (!nowPlayingSection) {
+            return;
+          }
+          if (isBusy) {
+            nowPlayingSection.setAttribute("aria-busy", "true");
+          } else {
+            nowPlayingSection.removeAttribute("aria-busy");
+          }
+        };
+
+        const extractErrorMessage = (payload, fallback) => {
+          if (payload && typeof payload === "object") {
+            const detail = payload.detail || payload.error || payload.message;
+            if (typeof detail === "string" && detail) {
+              return detail;
+            }
+          }
+          return fallback;
+        };
+
         const handlePlayVideo = async (event) => {
-          // TODO: attempt to play video
+          event.preventDefault();
+
+          const option = event.currentTarget;
+          if (!(option instanceof HTMLElement)) {
+            return;
+          }
+
+          const videoId = option.dataset.videoId;
+          if (!videoId || !playApiUrl) {
+            return;
+          }
+
+          const pendingDetails = {
+            title:
+              option.dataset.videoTitle ||
+              (option.querySelector(".video-title")?.textContent || ""),
+            thumbnail_url:
+              option.dataset.thumbnailUrl ||
+              (option.querySelector(".video-thumbnail")?.getAttribute("src") || ""),
+            video_id: videoId,
+          };
+
+          applyNowPlayingDetails(pendingDetails);
+          setNowPlayingStatus("Playing...");
+          setNowPlayingBusy(true);
+
+          try {
+            const response = await fetch(playApiUrl, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ video_id: videoId }),
+            });
+
+            let payload = null;
+            try {
+              payload = await response.json();
+            } catch (error) {
+              payload = null;
+            }
+
+            if (!response.ok) {
+              const message = extractErrorMessage(
+                payload,
+                response.statusText || "Unable to play video."
+              );
+              setNowPlayingStatus(message);
+              return;
+            }
+
+            if (payload && typeof payload === "object" && payload.playing) {
+              const playingData = payload.playing;
+              if (playingData && typeof playingData === "object") {
+                applyNowPlayingDetails({
+                  title:
+                    typeof playingData.title === "string" && playingData.title
+                      ? playingData.title
+                      : pendingDetails.title,
+                  thumbnail_url:
+                    typeof playingData.thumbnail_url === "string" && playingData.thumbnail_url
+                      ? playingData.thumbnail_url
+                      : pendingDetails.thumbnail_url,
+                  video_id:
+                    typeof playingData.video_id === "string" && playingData.video_id
+                      ? playingData.video_id
+                      : pendingDetails.video_id,
+                });
+              }
+            }
+
+            setNowPlayingStatus("");
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unable to play video.";
+            setNowPlayingStatus(message);
+            console.error(error);
+          } finally {
+            setNowPlayingBusy(false);
+          }
         };
 
         const setLoadingState = (isLoading) => {
@@ -72,15 +220,21 @@
             if (!video || typeof video !== "object") {
               return;
             }
+            const videoId = typeof video.video_id === "string" ? video.video_id : "";
             const thumbnailUrl = typeof video.thumbnail_url === "string" ? video.thumbnail_url : "";
             const title = typeof video.title === "string" ? video.title : "";
 
-            if (!thumbnailUrl || !title) {
+            if (!videoId || !thumbnailUrl || !title) {
               return;
             }
 
             const option = document.createElement("a");
             option.className = "video-option";
+            option.href = "#";
+            option.setAttribute("role", "button");
+            option.dataset.videoId = videoId;
+            option.dataset.videoTitle = title;
+            option.dataset.thumbnailUrl = thumbnailUrl;
 
             const thumbnail = document.createElement("img");
             thumbnail.className = "video-thumbnail";

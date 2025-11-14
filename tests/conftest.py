@@ -175,6 +175,7 @@ def _install_fastapi_stubs() -> None:
                 self._name = name
                 self._connected = False
                 self._auth_payload: dict[str, str] | None = None
+                self._last_played: str | None = None
 
             async def __aenter__(self):  # pragma: no cover - stub
                 return self
@@ -206,6 +207,9 @@ def _install_fastapi_stubs() -> None:
 
             async def close(self):  # pragma: no cover - stub
                 self._connected = False
+
+            def play_video(self, video_id: str):  # pragma: no cover - stub
+                self._last_played = video_id
 
         wrapper_module.YtLoungeApi = _YtLoungeApi
         models_module.AUTH_VERSION_V1 = 0

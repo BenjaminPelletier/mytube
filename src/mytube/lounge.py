@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from collections.abc import Mapping
@@ -222,6 +223,24 @@ class LoungeController:
             normalized_payload = self._apply_auth_state(payload, loaded=True)
         await self.connect()
         return normalized_payload
+
+    async def play_video(self, video_id: str) -> None:
+        """Start playback of the provided video identifier."""
+
+        normalized_id = str(video_id).strip()
+        if not normalized_id:
+            raise ValueError("Video identifier is required.")
+
+        async with self._lock:
+            await self.ensure_connected()
+            api = await self._ensure_api()
+            play_method = getattr(api, "play_video", None)
+            if play_method is None:
+                raise RuntimeError("YouTube TV connection does not support playback.")
+
+            result = play_method(normalized_id)
+            if inspect.isawaitable(result):
+                await result
 
     async def get_status(self) -> dict[str, Any]:
         """Return connection information about the controller."""
