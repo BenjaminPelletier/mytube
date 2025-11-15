@@ -5,7 +5,7 @@
 <section>
   <h2 class="resource-title">
     <span class="resource-title-text">
-      {{ video.title }}{% if video.vote %} {{ video.vote }}{% endif %}
+      {{ video.title }}{% if video.vote %} {{ video.vote }}{% if video.flagged_disqualifier %}<span class="resource-flag" title="Flagged">⚑</span>{% endif %}{% endif %}
     </span>
     {% if video.info_url %}
     <a

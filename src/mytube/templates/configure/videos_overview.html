@@ -29,7 +29,11 @@
           <td class="videos-table-channel">{{ video.channel_title }}</td>
           <td class="videos-table-title">
             <a href="{{ video.url }}">{{ video.video_title }}</a>
-            {% if video.vote %}<span class="videos-table-vote">{{ video.vote }}</span>{% endif %}
+            {% if video.vote %}
+            <span class="videos-table-vote">
+              {{ video.vote }}{% if video.flagged_disqualifier %}<span class="videos-table-flag" title="Flagged"> ⚑</span>{% endif %}
+            </span>
+            {% endif %}
           </td>
           <td class="videos-table-actions">
             {% if video.raw_url %}
