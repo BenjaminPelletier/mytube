@@ -18,8 +18,18 @@
         <button type="button" class="playback-button pause-button" aria-label="Pause video">⏸</button>
       </div>
     </section>
-    <section class="video-options" aria-live="polite"></section>
-    <button id="refresh-videos" class="video-refresh" type="button" aria-label="Load new videos" hidden>🗘</button>
+    <section class="video-options" aria-live="polite">
+      <button
+        id="refresh-videos"
+        class="video-option refresh-option"
+        type="button"
+        aria-label="Load more videos"
+        hidden
+      >
+        <span class="refresh-icon" aria-hidden="true">🗘</span>
+        <span class="refresh-label">More videos</span>
+      </button>
+    </section>
     <p class="empty-state" id="video-empty">Loading videos…</p>
     <script>
       (() => {
@@ -280,6 +290,13 @@
           });
         }
 
+        const appendRefreshCard = () => {
+          if (!videoContainer || !refreshButton) {
+            return;
+          }
+          videoContainer.appendChild(refreshButton);
+        };
+
         const setLoadingState = (isLoading) => {
           if (refreshButton) {
             refreshButton.disabled = isLoading;
@@ -306,6 +323,7 @@
               emptyState.textContent = "No approved videos are available to cast.";
               emptyState.hidden = false;
             }
+            appendRefreshCard();
             return;
           }
 
@@ -349,6 +367,7 @@
           });
 
           videoContainer.appendChild(fragment);
+          appendRefreshCard();
 
           if (emptyState) {
             emptyState.hidden = true;
@@ -370,6 +389,7 @@
           } catch (error) {
             console.error(error);
             videoContainer.innerHTML = "";
+            appendRefreshCard();
             if (emptyState) {
               emptyState.textContent = "Unable to load videos.";
               emptyState.hidden = false;
