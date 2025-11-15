@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
@@ -18,6 +19,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from .lounge import LoungeManager, coerce_auth_state
 from .db import (
+    clear_resource_label,
     fetch_all_channels,
     fetch_all_playlists,
     fetch_all_videos,
@@ -28,6 +30,8 @@ from .db import (
     fetch_listed_videos,
     fetch_playlist,
     fetch_playlist_items,
+    fetch_resource_label,
+    fetch_resource_labels_map,
     fetch_video,
     initialize_database,
     log_history_event,
@@ -731,6 +735,12 @@ def create_app() -> FastAPI:
                 "play_api_url": app.url_path_for("play_video"),
                 "pause_api_url": app.url_path_for("pause_video"),
                 "resume_api_url": app.url_path_for("resume_video"),
+                "favorite_api_url": app.url_path_for(
+                    "toggle_favorite", video_id="__VIDEO_ID__"
+                ),
+                "flag_api_url": app.url_path_for(
+                    "toggle_flag", video_id="__VIDEO_ID__"
+                ),
             },
         )
 
@@ -747,7 +757,37 @@ def create_app() -> FastAPI:
     async def home(request: Request) -> HTMLResponse:
         return _render(request)
 
-    async def _random_video_options(limit: int = 5) -> list[dict[str, str | None]]:
+    async def _fetch_video_state_flags(
+        video_ids: list[str],
+    ) -> tuple[dict[str, bool], dict[str, bool]]:
+        if not video_ids:
+            return {}, {}
+
+        favorite_task = run_in_threadpool(
+            fetch_resource_labels_map,
+            "video.favorite",
+            video_ids,
+        )
+        flagged_task = run_in_threadpool(
+            fetch_resource_labels_map,
+            "video.flagged",
+            video_ids,
+        )
+
+        favorite_map, flagged_map = await asyncio.gather(
+            favorite_task, flagged_task
+        )
+        favorite_flags = {
+            video_id: favorite_map.get(video_id) == "favorite"
+            for video_id in video_ids
+        }
+        flagged_flags = {
+            video_id: flagged_map.get(video_id) == "flagged"
+            for video_id in video_ids
+        }
+        return favorite_flags, flagged_flags
+
+    async def _random_video_options(limit: int = 5) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
 
@@ -762,7 +802,8 @@ def create_app() -> FastAPI:
 
         random.shuffle(approved_videos)
 
-        video_options: list[dict[str, str | None]] = []
+        video_options: list[dict[str, Any]] = []
+        video_ids: list[str] = []
         for entry in approved_videos:
             if len(video_options) >= limit:
                 break
@@ -784,8 +825,21 @@ def create_app() -> FastAPI:
                     "video_id": video_id,
                     "title": title,
                     "thumbnail_url": thumbnail_url,
+                    "favorite": False,
+                    "flagged": False,
                 }
             )
+            video_ids.append(video_id)
+
+        if not video_options:
+            return video_options
+
+        favorite_flags, flagged_flags = await _fetch_video_state_flags(video_ids)
+        for option in video_options:
+            video_id = option.get("video_id")
+            if isinstance(video_id, str):
+                option["favorite"] = favorite_flags.get(video_id, False)
+                option["flagged"] = flagged_flags.get(video_id, False)
 
         return video_options
 
@@ -806,6 +860,74 @@ def create_app() -> FastAPI:
             },
         )
         return {"videos": videos}
+
+    @app.post("/videos/{video_id}/favorite", name="toggle_favorite")
+    async def toggle_favorite(video_id: str) -> dict[str, Any]:
+        normalized_id = video_id.strip()
+        if not normalized_id:
+            raise HTTPException(status_code=400, detail="Video ID is required")
+
+        favorite_label = await run_in_threadpool(
+            fetch_resource_label,
+            "video.favorite",
+            normalized_id,
+        )
+        is_favorite = favorite_label == "favorite"
+
+        if is_favorite:
+            await run_in_threadpool(
+                clear_resource_label,
+                "video.favorite",
+                normalized_id,
+            )
+        else:
+            await run_in_threadpool(
+                set_resource_label,
+                "video.favorite",
+                normalized_id,
+                "favorite",
+            )
+
+        await _record_history_event(
+            "video.favorite.toggle",
+            {"video_id": normalized_id, "favorite": not is_favorite},
+        )
+
+        return {"video_id": normalized_id, "favorite": not is_favorite}
+
+    @app.post("/videos/{video_id}/flag", name="toggle_flag")
+    async def toggle_flag(video_id: str) -> dict[str, Any]:
+        normalized_id = video_id.strip()
+        if not normalized_id:
+            raise HTTPException(status_code=400, detail="Video ID is required")
+
+        flag_label = await run_in_threadpool(
+            fetch_resource_label,
+            "video.flagged",
+            normalized_id,
+        )
+        is_flagged = flag_label == "flagged"
+
+        if is_flagged:
+            await run_in_threadpool(
+                clear_resource_label,
+                "video.flagged",
+                normalized_id,
+            )
+        else:
+            await run_in_threadpool(
+                set_resource_label,
+                "video.flagged",
+                normalized_id,
+                "flagged",
+            )
+
+        await _record_history_event(
+            "video.flag.toggle",
+            {"video_id": normalized_id, "flagged": not is_flagged},
+        )
+
+        return {"video_id": normalized_id, "flagged": not is_flagged}
 
     @app.post("/lounge/play", name="play_video")
     async def play_video_handler(request: Request) -> dict[str, Any]:
@@ -883,7 +1005,7 @@ def create_app() -> FastAPI:
             ) from exc
 
         video_record, _ = await _load_video_record(video_id)
-        playing_context: dict[str, str | None]
+        playing_context: dict[str, Any]
         if video_record and video_record.get("raw_json"):
             playing_context = _build_playing_context(video_record, video_id)
         else:
@@ -892,6 +1014,22 @@ def create_app() -> FastAPI:
                 "thumbnail_url": None,
                 "video_id": video_id,
             }
+
+        favorite_label_task = run_in_threadpool(
+            fetch_resource_label,
+            "video.favorite",
+            video_id,
+        )
+        flagged_label_task = run_in_threadpool(
+            fetch_resource_label,
+            "video.flagged",
+            video_id,
+        )
+        favorite_label, flagged_label = await asyncio.gather(
+            favorite_label_task, flagged_label_task
+        )
+        playing_context["favorite"] = favorite_label == "favorite"
+        playing_context["flagged"] = flagged_label == "flagged"
 
         return {"playing": playing_context}
 

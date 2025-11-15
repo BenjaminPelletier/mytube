@@ -100,7 +100,7 @@ class ResourceLabel(SQLModel, table=True):
     __tablename__ = "resource_labels"
     __table_args__ = (
         CheckConstraint(
-            "label IN ('whitelisted', 'blacklisted')",
+            "label IN ('whitelisted', 'blacklisted', 'favorite', 'flagged')",
             name="ck_resource_labels_label",
         ),
     )
@@ -589,8 +589,10 @@ def set_resource_label(
 ) -> None:
     """Persist a label for a resource."""
 
-    if label not in {"whitelisted", "blacklisted"}:
-        raise ValueError("Label must be 'whitelisted' or 'blacklisted'")
+    if label not in {"whitelisted", "blacklisted", "favorite", "flagged"}:
+        raise ValueError(
+            "Label must be one of 'whitelisted', 'blacklisted', 'favorite', or 'flagged'"
+        )
 
     def _persist(db_session: Session) -> None:
         existing = db_session.get(ResourceLabel, (resource_type, resource_id))
@@ -613,6 +615,61 @@ def set_resource_label(
     with Session(engine) as session_obj:
         _persist(session_obj)
         session_obj.commit()
+
+
+def clear_resource_label(
+    resource_type: str,
+    resource_id: str,
+    *,
+    session: Session | None = None,
+) -> None:
+    """Remove a stored label for a resource if it exists."""
+
+    def _delete(db_session: Session) -> None:
+        existing = db_session.get(ResourceLabel, (resource_type, resource_id))
+        if existing is not None:
+            db_session.delete(existing)
+
+    if session is not None:
+        _delete(session)
+        return
+
+    engine = _get_engine()
+    with Session(engine) as session_obj:
+        _delete(session_obj)
+        session_obj.commit()
+
+
+def fetch_resource_labels_map(
+    resource_type: str,
+    resource_ids: Iterable[str],
+    *,
+    session: Session | None = None,
+) -> dict[str, str]:
+    """Return labels for the provided resource identifiers."""
+
+    normalized_ids = [
+        resource_id
+        for resource_id in {str(value).strip() for value in resource_ids}
+        if resource_id
+    ]
+    if not normalized_ids:
+        return {}
+
+    def _query(db_session: Session) -> dict[str, str]:
+        statement = (
+            select(ResourceLabel.resource_id, ResourceLabel.label)
+            .where(ResourceLabel.resource_type == resource_type)
+            .where(ResourceLabel.resource_id.in_(normalized_ids))
+        )
+        return {resource_id: label for resource_id, label in db_session.exec(statement)}
+
+    if session is not None:
+        return _query(session)
+
+    engine = _get_engine()
+    with Session(engine) as session_obj:
+        return _query(session_obj)
 
 
 def fetch_settings(keys: Iterable[str] | None = None) -> dict[str, str]:
@@ -1043,7 +1100,9 @@ __all__ = [
     "fetch_all_channels",
     "fetch_all_videos",
     "set_resource_label",
+    "clear_resource_label",
     "fetch_resource_label",
+    "fetch_resource_labels_map",
     "fetch_listed_videos",
     "fetch_listed_video",
     "repopulate_listed_videos",
