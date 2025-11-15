@@ -330,7 +330,6 @@ class LoungeManager:
                 self._controllers[screen_id] = controller
             else:
                 await controller.update_auth(normalized, name=name)
-        await controller.ensure_connected()
         return controller
 
     async def pair_with_code(
