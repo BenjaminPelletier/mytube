@@ -1056,7 +1056,7 @@ def repopulate_listed_videos() -> None:
             ResourceLabel.resource_type == "video",
             ResourceLabel.label == "flagged",
         )
-        for (video_id,) in session.exec(flagged_stmt):
+        for video_id in session.exec(flagged_stmt):
             if not video_id or video_id not in listings:
                 continue
             entry = _ensure_entry(video_id)
