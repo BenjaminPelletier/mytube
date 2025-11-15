@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Iterable
 from pathlib import Path
@@ -13,6 +14,9 @@ import urllib.request
 
 from fastapi import HTTPException
 from starlette.concurrency import run_in_threadpool
+
+
+logger = logging.getLogger(__name__)
 
 
 def load_youtube_api_key() -> str:
@@ -109,7 +113,62 @@ async def fetch_youtube_playlist_items(
         "maxResults": "50",
         "key": api_key,
     }
-    return await run_in_threadpool(_youtube_api_request, "playlistItems", params)
+
+    all_items: list[dict[str, Any]] = []
+    combined_data: dict[str, Any] | None = None
+    next_page_token: str | None = None
+    page_count = 0
+    url = ""
+
+    while True:
+        page_params = dict(params)
+        if next_page_token:
+            page_params["pageToken"] = next_page_token
+
+        url, data = await run_in_threadpool(
+            _youtube_api_request, "playlistItems", page_params
+        )
+
+        page_count += 1
+        page_items = data.get("items") or []
+        all_items.extend(page_items)
+
+        if combined_data is None:
+            combined_data = data
+        else:
+            existing_items = combined_data.get("items")
+            if isinstance(existing_items, list):
+                existing_items.extend(page_items)
+            else:
+                combined_data["items"] = list(all_items)
+
+        next_page_token_value = data.get("nextPageToken")
+        next_page_token = (
+            next_page_token_value if isinstance(next_page_token_value, str) else None
+        )
+
+        if not next_page_token:
+            break
+
+        if page_count >= 40:
+            logger.warning(
+                "Stopped fetching playlistItems for playlist %s after %s pages due to limit.",
+                playlist_id,
+                page_count,
+            )
+            next_page_token = None
+            break
+
+    if combined_data is None:
+        combined_data = {"items": []}
+    else:
+        combined_data["items"] = list(all_items)
+        page_info = combined_data.get("pageInfo")
+        if isinstance(page_info, dict):
+            page_info["totalResults"] = len(all_items)
+        combined_data.pop("nextPageToken", None)
+
+    return url, combined_data
 
 
 async def fetch_youtube_channels(
