@@ -408,7 +408,7 @@ def _playlist_resource_content(
     playlist_context: dict[str, Any] = {
         "id": playlist_id_str,
         "list_label": list_label,
-        "items": [],
+        "item_entries": [],
         "info_url": (
             f"/configure/playlists/{encoded_playlist_id}/raw" if playlist else None
         ),
@@ -456,7 +456,7 @@ def _playlist_resource_content(
 
         if video_id:
             encoded_video_id = quote(str(video_id), safe="")
-            playlist_context["items"].append(
+            playlist_context["item_entries"].append(
                 {
                     "title": title,
                     "video_id": str(video_id),
@@ -464,7 +464,7 @@ def _playlist_resource_content(
                 }
             )
         else:
-            playlist_context["items"].append(
+            playlist_context["item_entries"].append(
                 {
                     "title": title,
                     "video_id": None,
