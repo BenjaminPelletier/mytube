@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from sqlalchemy import CheckConstraint, Column, Text, and_, delete
+from sqlalchemy import CheckConstraint, Column, Text, and_, delete, or_
 from sqlalchemy.engine import Engine
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
@@ -466,6 +466,39 @@ def save_video(video: dict, *, retrieved_at: datetime) -> None:
                 )
             )
         session.commit()
+
+
+def fetch_video_ids_missing_raw_json(
+    limit: int, *, exclude: Iterable[str] | None = None
+) -> list[str]:
+    """Return video IDs that are missing raw JSON payloads."""
+
+    if limit <= 0:
+        return []
+
+    exclude_set = {str(video_id) for video_id in (exclude or []) if str(video_id)}
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement_limit = limit + len(exclude_set) if exclude_set else limit
+        statement = (
+            select(Video.id)
+            .where(or_(Video.raw_json == "", Video.raw_json.is_(None)))
+            .order_by(Video.retrieved_at.desc(), Video.id)
+            .limit(statement_limit)
+        )
+        rows = session.exec(statement).all()
+
+    missing_ids: list[str] = []
+    for row in rows:
+        if not isinstance(row, str):
+            continue
+        if row in exclude_set:
+            continue
+        missing_ids.append(row)
+        if len(missing_ids) >= limit:
+            break
+    return missing_ids
 
 
 def fetch_channel(channel_id: str) -> dict | None:

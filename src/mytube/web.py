@@ -47,7 +47,7 @@ from .youtube import (
     fetch_youtube_channels,
     fetch_youtube_playlist_items,
     fetch_youtube_playlists,
-    fetch_youtube_videos,
+    fetch_youtube_video_with_bonus,
     load_youtube_api_key,
 )
 
@@ -657,12 +657,9 @@ async def _load_video_record(video_id: str) -> tuple[dict[str, Any] | None, str 
         return video_record, None
 
     api_key = load_youtube_api_key()
-    _, payload = await fetch_youtube_videos(video_id, api_key)
-    items = payload.get("items") or []
-    if not items:
+    video = await fetch_youtube_video_with_bonus(video_id, api_key)
+    if not video:
         return None, "No video information available for that ID."
-
-    video = items[0]
     await run_in_threadpool(
         save_video,
         video,
@@ -1447,14 +1444,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Unknown list selection")
 
         api_key = load_youtube_api_key()
-        _, response_data = await fetch_youtube_videos(
+        video_data = await fetch_youtube_video_with_bonus(
             stripped_resource_id, api_key
         )
-        items = response_data.get("items") or []
-        if not items:
+        if not video_data:
             raise HTTPException(status_code=404, detail="Video not found")
-
-        video_data = items[0]
         video_id = video_data.get("id") or stripped_resource_id
         label = LIST_TO_RESOURCE_LABEL.get(list_choice)
         if label is None:
