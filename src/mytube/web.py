@@ -192,11 +192,18 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str
         if not video_id:
             continue
         title = video.get("title") or video_id
+        channel_title_value = video.get("channel_title")
+        channel_title = (
+            channel_title_value.strip()
+            if isinstance(channel_title_value, str) and channel_title_value.strip()
+            else "Unknown channel"
+        )
+        display_title = f"[{channel_title}] {title}"
         vote = _resource_vote(video.get("label"))
         encoded_id = quote(video_id, safe="")
         items.append(
             {
-                "title": title,
+                "title": display_title,
                 "url": f"/configure/videos/{encoded_id}",
                 "vote": vote,
             }
