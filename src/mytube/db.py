@@ -947,6 +947,7 @@ def fetch_all_videos() -> list[dict]:
                 Video.channel_title,
                 Video.retrieved_at,
                 ResourceLabel.label,
+                Video.raw_json,
             )
             .select_from(Video)
             .join(
@@ -971,6 +972,7 @@ def fetch_all_videos() -> list[dict]:
             "channel_title": row[2],
             "retrieved_at": row[3],
             "label": row[4],
+            "has_raw": bool(row[5]),
         }
         for row in rows
     ]

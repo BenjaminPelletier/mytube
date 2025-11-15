@@ -4,13 +4,47 @@
 <section>
   <h2>Stored Videos</h2>
   {% if videos %}
-  <ol>
-    {% for video in videos %}
-    <li>
-      <a href="{{ video.url }}">{{ video.title }}</a>{% if video.vote %} {{ video.vote }}{% endif %}
-    </li>
-    {% endfor %}
-  </ol>
+  <div class="videos-table-wrapper">
+    <table class="videos-table">
+      <colgroup>
+        <col class="videos-table-play-column" />
+        <col class="videos-table-channel-column" />
+        <col class="videos-table-title-column" />
+        <col class="videos-table-actions-column" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col" class="videos-table-play">Play</th>
+          <th scope="col">Channel</th>
+          <th scope="col">Video</th>
+          <th scope="col" class="videos-table-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for video in videos %}
+        <tr>
+          <td class="videos-table-play">
+            <a class="videos-table-icon" href="{{ video.play_url }}" title="Play on home page">▶</a>
+          </td>
+          <td class="videos-table-channel">{{ video.channel_title }}</td>
+          <td class="videos-table-title">
+            <a href="{{ video.url }}">{{ video.video_title }}</a>
+            {% if video.vote %}<span class="videos-table-vote">{{ video.vote }}</span>{% endif %}
+          </td>
+          <td class="videos-table-actions">
+            {% if video.raw_url %}
+            <a class="videos-table-icon" href="{{ video.raw_url }}" title="View raw data">✅</a>
+            {% else %}
+            <form method="post" action="{{ video.load_url }}" class="videos-table-load-form">
+              <button type="submit" title="Load video data">⤓</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
   <p>No videos have been stored yet.</p>
   {% endif %}
