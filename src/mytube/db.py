@@ -91,6 +91,7 @@ class Video(SQLModel, table=True):
     description: str | None = None
     raw_json: str = Field(nullable=False)
     retrieved_at: str = Field(nullable=False)
+    channel_title: str | None = None
 
 
 class ResourceLabel(SQLModel, table=True):
@@ -436,6 +437,12 @@ def save_video(video: dict, *, retrieved_at: datetime) -> None:
     snippet = video.get("snippet") or {}
     title = snippet.get("title")
     description = snippet.get("description")
+    channel_title_value = snippet.get("channelTitle")
+    channel_title = (
+        channel_title_value.strip()
+        if isinstance(channel_title_value, str) and channel_title_value.strip()
+        else None
+    )
     raw_json = json.dumps(video, separators=(",", ":"))
     engine = _get_engine()
     with Session(engine) as session:
@@ -445,6 +452,8 @@ def save_video(video: dict, *, retrieved_at: datetime) -> None:
             existing.description = description
             existing.raw_json = raw_json
             existing.retrieved_at = retrieved_at.isoformat()
+            if channel_title:
+                existing.channel_title = channel_title
         else:
             session.add(
                 Video(
@@ -453,6 +462,7 @@ def save_video(video: dict, *, retrieved_at: datetime) -> None:
                     description=description,
                     raw_json=raw_json,
                     retrieved_at=retrieved_at.isoformat(),
+                    channel_title=channel_title,
                 )
             )
         session.commit()
@@ -533,6 +543,7 @@ def fetch_video(video_id: str) -> dict | None:
         "retrieved_at": record.retrieved_at,
         "label": label,
         "whitelist": label == "whitelisted" if label is not None else False,
+        "channel_title": record.channel_title,
     }
 
 
@@ -897,7 +908,13 @@ def fetch_all_videos() -> list[dict]:
     engine = _get_engine()
     with Session(engine) as session:
         statement = (
-            select(Video.id, Video.title, Video.retrieved_at, ResourceLabel.label)
+            select(
+                Video.id,
+                Video.title,
+                Video.channel_title,
+                Video.retrieved_at,
+                ResourceLabel.label,
+            )
             .select_from(Video)
             .join(
                 ResourceLabel,
@@ -918,8 +935,9 @@ def fetch_all_videos() -> list[dict]:
         {
             "id": row[0],
             "title": row[1],
-            "retrieved_at": row[2],
-            "label": row[3],
+            "channel_title": row[2],
+            "retrieved_at": row[3],
+            "label": row[4],
         }
         for row in rows
     ]
