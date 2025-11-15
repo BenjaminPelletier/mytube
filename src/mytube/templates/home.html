@@ -2,10 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>MyTube Remote</title>
+    <title>{{ page_title or "MyTube Remote" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='home.css') }}">
   </head>
   <body>
+    <nav class="menu-bar" aria-label="Primary">
+      <a
+        class="menu-link{% if menu_active == 'home' %} is-active{% endif %}"
+        href="{{ url_for('home') }}"
+        aria-label="Home"
+        {% if menu_active == 'home' %}aria-current="page"{% endif %}
+      >
+        <span class="menu-icon" aria-hidden="true">🏠</span>
+        <span class="menu-label">Home</span>
+      </a>
+      <a
+        class="menu-link{% if menu_active == 'favorites' %} is-active{% endif %}"
+        href="{{ url_for('favorites') }}"
+        aria-label="Favorites"
+        {% if menu_active == 'favorites' %}aria-current="page"{% endif %}
+      >
+        <span class="menu-icon" aria-hidden="true">♥</span>
+        <span class="menu-label">Favorites</span>
+      </a>
+    </nav>
     <section class="now-playing" aria-live="polite" hidden>
       <p class="caption">Playing:</p>
       <img class="thumbnail" alt="" hidden>
