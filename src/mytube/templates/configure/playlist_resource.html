@@ -31,10 +31,10 @@
   {% if playlist.list_label %}
   <p><strong>List preference:</strong> {{ playlist.list_label }}</p>
   {% endif %}
-  {% if playlist.items %}
+  {% if playlist.item_entries %}
   <p>Stored playlist item titles:</p>
   <ol>
-    {% for item in playlist.items %}
+    {% for item in playlist.item_entries %}
     <li>
       {% if item.video_url %}
       <a href="{{ item.video_url }}">{{ item.title }}</a>
