@@ -1,0 +1,28 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section class="history">
+  {% if events %}
+  <table class="history-table">
+    <thead>
+      <tr>
+        <th scope="col">When</th>
+        <th scope="col">Event</th>
+        <th scope="col">Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+      <tr>
+        <td data-label="When">{{ event.created_at }}</td>
+        <td data-label="Event">{{ event.event_type }}</td>
+        <td data-label="Details"><pre>{{ event.metadata_json }}</pre></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No history events recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

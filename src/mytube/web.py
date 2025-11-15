@@ -23,12 +23,14 @@ from .db import (
     fetch_all_videos,
     fetch_channel,
     fetch_channel_sections,
+    fetch_history,
     fetch_listed_video,
     fetch_listed_videos,
     fetch_playlist,
     fetch_playlist_items,
     fetch_video,
     initialize_database,
+    log_history_event,
     repopulate_listed_videos,
     fetch_settings,
     save_channel,
@@ -64,8 +66,11 @@ RESOURCE_NAVIGATION = (
     ("videos", "Videos"),
 )
 LIST_NAVIGATION = (("whitelist", "Whitelist"), ("blacklist", "Blacklist"))
+HISTORY_NAVIGATION = (("history", "History"),)
 SETTINGS_NAVIGATION = (("settings", "Settings"),)
-CONFIG_NAVIGATION = RESOURCE_NAVIGATION + LIST_NAVIGATION + SETTINGS_NAVIGATION
+CONFIG_NAVIGATION = (
+    RESOURCE_NAVIGATION + LIST_NAVIGATION + HISTORY_NAVIGATION + SETTINGS_NAVIGATION
+)
 RESOURCE_LABELS = {slug: label for slug, label in RESOURCE_NAVIGATION}
 LIST_PAGE_LABELS = {slug: label for slug, label in LIST_NAVIGATION}
 LIST_PAGE_FIELDS = {"whitelist": "whitelisted_by", "blacklist": "blacklisted_by"}
@@ -83,6 +88,7 @@ CONFIG_ROUTE_NAMES = {
     "videos": "configure_videos",
     "whitelist": "configure_whitelist",
     "blacklist": "configure_blacklist",
+    "history": "configure_history",
     "settings": "configure_settings",
 }
 
@@ -715,6 +721,15 @@ def create_app() -> FastAPI:
             },
         )
 
+    async def _record_history_event(
+        event_type: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        await run_in_threadpool(
+            log_history_event,
+            event_type,
+            metadata or {},
+        )
+
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request) -> HTMLResponse:
         return _render(request)
@@ -766,6 +781,17 @@ def create_app() -> FastAPI:
         """Return a random selection of approved videos."""
 
         videos = await _random_video_options(limit=limit)
+        await _record_history_event(
+            "videos.random",
+            {
+                "limit": limit,
+                "video_ids": [
+                    entry.get("video_id")
+                    for entry in videos
+                    if isinstance(entry.get("video_id"), str)
+                ],
+            },
+        )
         return {"videos": videos}
 
     @app.post("/lounge/play", name="play_video")
@@ -807,6 +833,11 @@ def create_app() -> FastAPI:
                 status_code=503,
                 detail="TV is not paired with the YouTube app.",
             )
+
+        await _record_history_event(
+            "lounge.play",
+            {"video_id": video_id, "screen_id": screen_id},
+        )
 
         try:
             controller = await lounge_manager_dep.get(screen_id)
@@ -875,6 +906,11 @@ def create_app() -> FastAPI:
                 detail="TV is not paired with the YouTube app.",
             )
 
+        await _record_history_event(
+            "lounge.pause",
+            {"screen_id": screen_id},
+        )
+
         try:
             controller = await lounge_manager_dep.get(screen_id)
             if controller is None:
@@ -928,6 +964,11 @@ def create_app() -> FastAPI:
                 status_code=503,
                 detail="TV is not paired with the YouTube app.",
             )
+
+        await _record_history_event(
+            "lounge.resume",
+            {"screen_id": screen_id},
+        )
 
         try:
             controller = await lounge_manager_dep.get(screen_id)
@@ -1068,6 +1109,52 @@ def create_app() -> FastAPI:
             active_section="blacklist",
             template_name="configure/listed_videos.html",
             context=list_context,
+            show_resource_form=False,
+        )
+
+    @app.get(
+        "/configure/history",
+        response_class=HTMLResponse,
+        name="configure_history",
+    )
+    async def configure_history(request: Request) -> HTMLResponse:
+        events = await run_in_threadpool(fetch_history, 20)
+        formatted_events: list[dict[str, Any]] = []
+        for event in events:
+            created_at = event.get("created_at")
+            created_at_display = created_at
+            if isinstance(created_at, str):
+                try:
+                    dt = datetime.fromisoformat(created_at)
+                except ValueError:
+                    dt = None
+                if dt is not None:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    created_at_display = dt.astimezone(timezone.utc).strftime(
+                        "%Y-%m-%d %H:%M:%S %Z"
+                    )
+
+            metadata = event.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
+            formatted_events.append(
+                {
+                    "id": event.get("id"),
+                    "event_type": event.get("event_type"),
+                    "created_at": created_at_display,
+                    "metadata_json": metadata_json,
+                }
+            )
+
+        return _render_config_page(
+            request,
+            app,
+            heading="Viewing History",
+            active_section="history",
+            template_name="configure/history.html",
+            context={"events": formatted_events},
             show_resource_form=False,
         )
 
