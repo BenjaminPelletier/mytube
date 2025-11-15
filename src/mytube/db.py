@@ -107,7 +107,7 @@ class ResourceLabel(SQLModel, table=True):
 
     resource_type: str = Field(primary_key=True)
     resource_id: str = Field(primary_key=True)
-    label: str = Field(nullable=False)
+    label: str = Field(primary_key=True)
 
 
 class ListedVideo(SQLModel, table=True):
@@ -123,6 +123,10 @@ class ListedVideo(SQLModel, table=True):
     blacklisted_by: str | None = Field(
         default=None,
         sa_column=Column("blacklisted_by", Text, nullable=True),
+    )
+    disqualifying_attributes: str | None = Field(
+        default=None,
+        sa_column=Column("disqualifying_attributes", Text, nullable=True),
     )
 
 
@@ -273,7 +277,12 @@ def fetch_playlist(playlist_id: str) -> dict | None:
     with Session(engine) as session:
         record = session.get(Playlist, playlist_id)
         label = (
-            fetch_resource_label("playlist", playlist_id, session=session)
+            fetch_resource_label(
+                "playlist",
+                playlist_id,
+                labels={"whitelisted", "blacklisted"},
+                session=session,
+            )
             if record
             else None
         )
@@ -309,6 +318,7 @@ def fetch_all_playlists() -> list[dict]:
                 and_(
                     ResourceLabel.resource_type == "playlist",
                     ResourceLabel.resource_id == Playlist.id,
+                    ResourceLabel.label.in_({"whitelisted", "blacklisted"}),
                 ),
                 isouter=True,
             )
@@ -508,7 +518,12 @@ def fetch_channel(channel_id: str) -> dict | None:
     with Session(engine) as session:
         record = session.get(Channel, channel_id)
         label = (
-            fetch_resource_label("channel", channel_id, session=session)
+            fetch_resource_label(
+                "channel",
+                channel_id,
+                labels={"whitelisted", "blacklisted"},
+                session=session,
+            )
             if record
             else None
         )
@@ -556,7 +571,12 @@ def fetch_video(video_id: str) -> dict | None:
     with Session(engine) as session:
         record = session.get(Video, video_id)
         label = (
-            fetch_resource_label("video", video_id, session=session)
+            fetch_resource_label(
+                "video",
+                video_id,
+                labels={"whitelisted", "blacklisted"},
+                session=session,
+            )
             if record
             else None
         )
@@ -595,10 +615,18 @@ def set_resource_label(
         )
 
     def _persist(db_session: Session) -> None:
-        existing = db_session.get(ResourceLabel, (resource_type, resource_id))
-        if existing:
-            existing.label = label
-        else:
+        if label in {"whitelisted", "blacklisted"}:
+            opposite = "blacklisted" if label == "whitelisted" else "whitelisted"
+            db_session.exec(
+                delete(ResourceLabel).where(
+                    ResourceLabel.resource_type == resource_type,
+                    ResourceLabel.resource_id == resource_id,
+                    ResourceLabel.label == opposite,
+                )
+            )
+
+        existing = db_session.get(ResourceLabel, (resource_type, resource_id, label))
+        if not existing:
             db_session.add(
                 ResourceLabel(
                     resource_type=resource_type,
@@ -620,15 +648,21 @@ def set_resource_label(
 def clear_resource_label(
     resource_type: str,
     resource_id: str,
+    label: str | None = None,
     *,
     session: Session | None = None,
 ) -> None:
     """Remove a stored label for a resource if it exists."""
 
     def _delete(db_session: Session) -> None:
-        existing = db_session.get(ResourceLabel, (resource_type, resource_id))
-        if existing is not None:
-            db_session.delete(existing)
+        statement = (
+            delete(ResourceLabel)
+            .where(ResourceLabel.resource_type == resource_type)
+            .where(ResourceLabel.resource_id == resource_id)
+        )
+        if label:
+            statement = statement.where(ResourceLabel.label == label)
+        db_session.exec(statement)
 
     if session is not None:
         _delete(session)
@@ -643,6 +677,7 @@ def clear_resource_label(
 def fetch_resource_labels_map(
     resource_type: str,
     resource_ids: Iterable[str],
+    labels: Iterable[str] | None = None,
     *,
     session: Session | None = None,
 ) -> dict[str, str]:
@@ -656,12 +691,17 @@ def fetch_resource_labels_map(
     if not normalized_ids:
         return {}
 
+    label_set = {label for label in labels or [] if isinstance(label, str)}
+    label_filter = {label.strip() for label in label_set if label.strip()}
+
     def _query(db_session: Session) -> dict[str, str]:
         statement = (
             select(ResourceLabel.resource_id, ResourceLabel.label)
             .where(ResourceLabel.resource_type == resource_type)
             .where(ResourceLabel.resource_id.in_(normalized_ids))
         )
+        if label_filter:
+            statement = statement.where(ResourceLabel.label.in_(label_filter))
         return {resource_id: label for resource_id, label in db_session.exec(statement)}
 
     if session is not None:
@@ -729,14 +769,24 @@ def store_settings(settings: dict[str, str | None]) -> None:
 def fetch_resource_label(
     resource_type: str,
     resource_id: str,
+    labels: Iterable[str] | None = None,
     *,
     session: Session | None = None,
 ) -> str | None:
     """Retrieve the stored label for a resource, if any."""
 
+    label_set = {label for label in labels or [] if isinstance(label, str)}
+    label_filter = {label.strip() for label in label_set if label.strip()}
+
     def _query(db_session: Session) -> str | None:
-        record = db_session.get(ResourceLabel, (resource_type, resource_id))
-        return record.label if record else None
+        statement = select(ResourceLabel.label).where(
+            ResourceLabel.resource_type == resource_type,
+            ResourceLabel.resource_id == resource_id,
+        )
+        if label_filter:
+            statement = statement.where(ResourceLabel.label.in_(label_filter))
+        result = db_session.exec(statement).first()
+        return result[0] if result else None
 
     if session is not None:
         return _query(session)
@@ -764,6 +814,7 @@ def fetch_all_channels() -> list[dict]:
                 and_(
                     ResourceLabel.resource_type == "channel",
                     ResourceLabel.resource_id == Channel.id,
+                    ResourceLabel.label.in_({"whitelisted", "blacklisted"}),
                 ),
                 isouter=True,
             )
@@ -847,6 +898,7 @@ def fetch_listed_videos(list_type: str) -> list[dict[str, Any]]:
                 ListedVideo.video_id,
                 ListedVideo.whitelisted_by,
                 ListedVideo.blacklisted_by,
+                ListedVideo.disqualifying_attributes,
                 Video.title,
             )
             .select_from(ListedVideo)
@@ -857,13 +909,16 @@ def fetch_listed_videos(list_type: str) -> list[dict[str, Any]]:
         rows = session.exec(statement).all()
 
     results: list[dict[str, Any]] = []
-    for video_id, whitelisted_by, blacklisted_by, title in rows:
+    for video_id, whitelisted_by, blacklisted_by, disqualifying_attributes, title in rows:
         results.append(
             {
                 "video_id": video_id,
                 "title": title,
                 "whitelisted_by": _load_identifier_list(whitelisted_by),
                 "blacklisted_by": _load_identifier_list(blacklisted_by),
+                "disqualifying_attributes": _load_identifier_list(
+                    disqualifying_attributes
+                ),
             }
         )
     return results
@@ -883,7 +938,39 @@ def fetch_listed_video(video_id: str) -> dict[str, Any] | None:
         "video_id": record.video_id,
         "whitelisted_by": _load_identifier_list(record.whitelisted_by),
         "blacklisted_by": _load_identifier_list(record.blacklisted_by),
+        "disqualifying_attributes": _load_identifier_list(
+            record.disqualifying_attributes
+        ),
     }
+
+
+def refresh_listed_video_disqualifications(video_id: str) -> None:
+    """Recalculate disqualifying attributes for a listed video."""
+
+    normalized_id = video_id.strip()
+    if not normalized_id:
+        return
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        record = session.get(ListedVideo, normalized_id)
+        if record is None:
+            return
+
+        attributes = set(
+            _load_identifier_list(record.disqualifying_attributes)
+        )
+        flagged_label = fetch_resource_label(
+            "video", normalized_id, labels={"flagged"}, session=session
+        )
+        if flagged_label == "flagged":
+            attributes.add("flagged")
+        else:
+            attributes.discard("flagged")
+
+        record.disqualifying_attributes = _dump_identifier_list(attributes)
+        session.add(record)
+        session.commit()
 
 
 def repopulate_listed_videos() -> None:
@@ -896,7 +983,11 @@ def repopulate_listed_videos() -> None:
         def _ensure_entry(video_id: str) -> dict[str, set[str]]:
             entry = listings.get(video_id)
             if entry is None:
-                entry = {"whitelisted_by": set(), "blacklisted_by": set()}
+                entry = {
+                    "whitelisted_by": set(),
+                    "blacklisted_by": set(),
+                    "disqualifying_attributes": set(),
+                }
                 listings[video_id] = entry
             return entry
 
@@ -960,6 +1051,17 @@ def repopulate_listed_videos() -> None:
                 entry = _ensure_entry(video_id)
                 entry[key].add(channel_id)
 
+        # Step 4: flagged videos
+        flagged_stmt = select(ResourceLabel.resource_id).where(
+            ResourceLabel.resource_type == "video",
+            ResourceLabel.label == "flagged",
+        )
+        for video_id in session.exec(flagged_stmt):
+            if not video_id or video_id not in listings:
+                continue
+            entry = _ensure_entry(video_id)
+            entry["disqualifying_attributes"].add("flagged")
+
         # Persist listings
         existing_entries = {
             row.video_id: row for row in session.exec(select(ListedVideo)).all()
@@ -969,16 +1071,21 @@ def repopulate_listed_videos() -> None:
         for video_id, data in listings.items():
             whitelist_json = _dump_identifier_list(data["whitelisted_by"])
             blacklist_json = _dump_identifier_list(data["blacklisted_by"])
+            disqualifying_json = _dump_identifier_list(
+                data["disqualifying_attributes"]
+            )
             entry = existing_entries.get(video_id)
             if entry:
                 entry.whitelisted_by = whitelist_json
                 entry.blacklisted_by = blacklist_json
+                entry.disqualifying_attributes = disqualifying_json
             else:
                 session.add(
                     ListedVideo(
                         video_id=video_id,
                         whitelisted_by=whitelist_json,
                         blacklisted_by=blacklist_json,
+                        disqualifying_attributes=disqualifying_json,
                     )
                 )
 
@@ -997,29 +1104,27 @@ def fetch_all_videos() -> list[dict]:
 
     engine = _get_engine()
     with Session(engine) as session:
+        list_label = (
+            select(ResourceLabel.label)
+            .where(ResourceLabel.resource_type == "video")
+            .where(ResourceLabel.resource_id == Video.id)
+            .where(ResourceLabel.label.in_({"whitelisted", "blacklisted"}))
+            .limit(1)
+            .scalar_subquery()
+        )
         statement = (
             select(
                 Video.id,
                 Video.title,
                 Video.channel_title,
                 Video.retrieved_at,
-                ResourceLabel.label,
+                list_label,
                 Video.raw_json,
+                ListedVideo.disqualifying_attributes,
             )
             .select_from(Video)
-            .join(
-                ResourceLabel,
-                and_(
-                    ResourceLabel.resource_type == "video",
-                    ResourceLabel.resource_id == Video.id,
-                ),
-                isouter=True,
-            )
-            .order_by(
-                ResourceLabel.label.is_(None),
-                Video.retrieved_at.desc(),
-                Video.id,
-            )
+            .join(ListedVideo, ListedVideo.video_id == Video.id, isouter=True)
+            .order_by(list_label.is_(None), Video.retrieved_at.desc(), Video.id)
         )
         rows = session.exec(statement).all()
     return [
@@ -1030,6 +1135,7 @@ def fetch_all_videos() -> list[dict]:
             "retrieved_at": row[3],
             "label": row[4],
             "has_raw": bool(row[5]),
+            "disqualifying_attributes": _load_identifier_list(row[6]),
         }
         for row in rows
     ]
@@ -1105,6 +1211,7 @@ __all__ = [
     "fetch_resource_labels_map",
     "fetch_listed_videos",
     "fetch_listed_video",
+    "refresh_listed_video_disqualifications",
     "repopulate_listed_videos",
     "log_history_event",
     "fetch_history",

@@ -6,6 +6,9 @@
   <form class="regenerate-form" method="post" action="{{ regenerate_url }}">
     <button type="submit">Regenerate</button>
   </form>
+  {% if approved_total is not none %}
+  <p class="listed-summary">Approved videos: <strong>{{ approved_total }}</strong></p>
+  {% endif %}
   {% if videos %}
   <ol>
     {% for video in videos %}

@@ -30,13 +30,14 @@ from .db import (
     fetch_listed_videos,
     fetch_playlist,
     fetch_playlist_items,
+    fetch_settings,
     fetch_resource_label,
     fetch_resource_labels_map,
     fetch_video,
     initialize_database,
     log_history_event,
     repopulate_listed_videos,
-    fetch_settings,
+    refresh_listed_video_disqualifications,
     save_channel,
     save_channel_sections,
     save_playlist,
@@ -209,6 +210,11 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str
         if not has_raw and "raw_json" in video:
             has_raw = bool(video.get("raw_json"))
         resource_url = f"/configure/videos/{encoded_id}"
+        disqualifying_attributes = video.get("disqualifying_attributes")
+        flagged_disqualifier = (
+            isinstance(disqualifying_attributes, list)
+            and "flagged" in disqualifying_attributes
+        )
         items.append(
             {
                 "video_id": video_id,
@@ -219,6 +225,7 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str
                 "raw_url": f"{resource_url}/raw" if has_raw else None,
                 "load_url": f"{resource_url}/load",
                 "vote": vote,
+                "flagged_disqualifier": flagged_disqualifier,
             }
         )
     return items
@@ -250,6 +257,15 @@ def _listed_videos_content(
         else {}
     )
 
+    approved_total: int | None = None
+    if list_slug == "whitelist":
+        approved_total = sum(
+            1
+            for video in videos
+            if not video.get("blacklisted_by")
+            and not video.get("disqualifying_attributes")
+        )
+
     items: list[dict[str, Any]] = []
     for video in videos:
         video_id = video.get("video_id") or ""
@@ -269,6 +285,7 @@ def _listed_videos_content(
         "heading_label": heading_label,
         "regenerate_url": regenerate_url,
         "videos": items,
+        "approved_total": approved_total,
     }
 
 
@@ -595,6 +612,16 @@ def _video_resource_content(
     video_identifier = video.get("id") or ""
     encoded_video_id = quote(video_identifier, safe="") if video_identifier else ""
 
+    disqualifying_attributes = (
+        listed_video.get("disqualifying_attributes")
+        if isinstance(listed_video, dict)
+        else []
+    )
+    flagged_disqualifier = (
+        isinstance(disqualifying_attributes, list)
+        and "flagged" in disqualifying_attributes
+    )
+
     return {
         "video": {
             "id": video_identifier,
@@ -603,6 +630,10 @@ def _video_resource_content(
             "retrieved_at": video.get("retrieved_at") or "Unknown",
             "label": video.get("label"),
             "vote": _resource_vote(video.get("label")),
+            "flagged_disqualifier": flagged_disqualifier,
+            "disqualifying_attributes": disqualifying_attributes
+            if isinstance(disqualifying_attributes, list)
+            else [],
             "info_url": (
                 f"/configure/videos/{encoded_video_id}/raw" if encoded_video_id else None
             ),
@@ -772,13 +803,15 @@ def create_app() -> FastAPI:
 
         favorite_task = run_in_threadpool(
             fetch_resource_labels_map,
-            "video.favorite",
+            "video",
             video_ids,
+            {"favorite"},
         )
         flagged_task = run_in_threadpool(
             fetch_resource_labels_map,
-            "video.flagged",
+            "video",
             video_ids,
+            {"flagged"},
         )
 
         favorite_map, flagged_map = await asyncio.gather(
@@ -802,7 +835,9 @@ def create_app() -> FastAPI:
         approved_videos = [
             video
             for video in listed_videos
-            if video.get("video_id") and not video.get("blacklisted_by")
+            if video.get("video_id")
+            and not video.get("blacklisted_by")
+            and not video.get("disqualifying_attributes")
         ]
         if not approved_videos:
             return []
@@ -876,21 +911,23 @@ def create_app() -> FastAPI:
 
         favorite_label = await run_in_threadpool(
             fetch_resource_label,
-            "video.favorite",
+            "video",
             normalized_id,
+            {"favorite"},
         )
         is_favorite = favorite_label == "favorite"
 
         if is_favorite:
             await run_in_threadpool(
                 clear_resource_label,
-                "video.favorite",
+                "video",
                 normalized_id,
+                "favorite",
             )
         else:
             await run_in_threadpool(
                 set_resource_label,
-                "video.favorite",
+                "video",
                 normalized_id,
                 "favorite",
             )
@@ -910,21 +947,23 @@ def create_app() -> FastAPI:
 
         flag_label = await run_in_threadpool(
             fetch_resource_label,
-            "video.flagged",
+            "video",
             normalized_id,
+            {"flagged"},
         )
         is_flagged = flag_label == "flagged"
 
         if is_flagged:
             await run_in_threadpool(
                 clear_resource_label,
-                "video.flagged",
+                "video",
                 normalized_id,
+                "flagged",
             )
         else:
             await run_in_threadpool(
                 set_resource_label,
-                "video.flagged",
+                "video",
                 normalized_id,
                 "flagged",
             )
@@ -932,6 +971,10 @@ def create_app() -> FastAPI:
         await _record_history_event(
             "video.flag.toggle",
             {"video_id": normalized_id, "flagged": not is_flagged},
+        )
+
+        await run_in_threadpool(
+            refresh_listed_video_disqualifications, normalized_id
         )
 
         return {"video_id": normalized_id, "flagged": not is_flagged}
@@ -1024,13 +1067,15 @@ def create_app() -> FastAPI:
 
         favorite_label_task = run_in_threadpool(
             fetch_resource_label,
-            "video.favorite",
+            "video",
             video_id,
+            {"favorite"},
         )
         flagged_label_task = run_in_threadpool(
             fetch_resource_label,
-            "video.flagged",
+            "video",
             video_id,
+            {"flagged"},
         )
         favorite_label, flagged_label = await asyncio.gather(
             favorite_label_task, flagged_label_task

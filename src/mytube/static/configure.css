@@ -103,6 +103,11 @@ h1 {
   background: #0756b3;
 }
 
+.listed-summary {
+  margin: 0.25rem 0 0.75rem;
+  font-weight: 600;
+}
+
 .configure-content section {
   background: #f6f8fa;
   border-radius: 0.75rem;
@@ -157,6 +162,11 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.resource-flag,
+.videos-table-flag {
+  color: #b11226;
 }
 
 .resource-info-link {
