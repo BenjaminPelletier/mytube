@@ -100,7 +100,7 @@ p.description {
   margin: 0 auto;
   padding: 1rem;
   border: 1px solid #e0e0e0;
-  border-radius: 0.75rem;
+  border-radius: 11px;
   background: #fff;
   text-decoration: none;
   color: inherit;
@@ -166,8 +166,9 @@ button.video-option:disabled {
 }
 
 .refresh-option .refresh-label {
+  margin: 0;
   font-weight: 600;
-  color: #222;
+  color: #111;
 }
 
 .empty-state {
