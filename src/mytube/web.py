@@ -757,12 +757,22 @@ def create_app() -> FastAPI:
     if static_directory.exists():
         app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
-    def _render(request: Request, *, play_video_id: str | None = None) -> HTMLResponse:
+    def _render(
+        request: Request,
+        *,
+        play_video_id: str | None = None,
+        page_title: str = "MyTube Remote",
+        videos_api_url: str | None = None,
+        menu_active: str = "home",
+    ) -> HTMLResponse:
         return templates.TemplateResponse(
             "home.html",
             {
                 "request": request,
-                "videos_api_url": app.url_path_for("list_random_videos"),
+                "page_title": page_title,
+                "menu_active": menu_active,
+                "videos_api_url": videos_api_url
+                or app.url_path_for("list_random_videos"),
                 "play_api_url": app.url_path_for("play_video"),
                 "pause_api_url": app.url_path_for("pause_video"),
                 "resume_api_url": app.url_path_for("resume_video"),
@@ -793,7 +803,16 @@ def create_app() -> FastAPI:
         play_video_id = (play or "").strip()
         if not play_video_id:
             play_video_id = None
-        return _render(request, play_video_id=play_video_id)
+        return _render(request, play_video_id=play_video_id, menu_active="home")
+
+    @app.get("/favorites", response_class=HTMLResponse, name="favorites")
+    async def favorites(request: Request) -> HTMLResponse:
+        return _render(
+            request,
+            page_title="MyTube Favorites",
+            videos_api_url=app.url_path_for("list_favorite_videos"),
+            menu_active="favorites",
+        )
 
     async def _fetch_video_state_flags(
         video_ids: list[str],
@@ -827,26 +846,18 @@ def create_app() -> FastAPI:
         }
         return favorite_flags, flagged_flags
 
-    async def _random_video_options(limit: int = 5) -> list[dict[str, Any]]:
+    async def _build_video_options(
+        entries: list[dict[str, Any]], *, limit: int = 5
+    ) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
 
-        listed_videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
-        approved_videos = [
-            video
-            for video in listed_videos
-            if video.get("video_id")
-            and not video.get("blacklisted_by")
-            and not video.get("disqualifying_attributes")
-        ]
-        if not approved_videos:
-            return []
-
-        random.shuffle(approved_videos)
+        shuffled_entries = list(entries)
+        random.shuffle(shuffled_entries)
 
         video_options: list[dict[str, Any]] = []
         video_ids: list[str] = []
-        for entry in approved_videos:
+        for entry in shuffled_entries:
             if len(video_options) >= limit:
                 break
             video_id = entry.get("video_id")
@@ -885,6 +896,52 @@ def create_app() -> FastAPI:
 
         return video_options
 
+    async def _random_video_options(limit: int = 5) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        listed_videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
+        approved_videos = [
+            video
+            for video in listed_videos
+            if video.get("video_id")
+            and not video.get("blacklisted_by")
+            and not video.get("disqualifying_attributes")
+        ]
+        if not approved_videos:
+            return []
+
+        return await _build_video_options(approved_videos, limit=limit)
+
+    async def _favorite_video_options(limit: int = 5) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        listed_videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
+        approved_videos = [
+            video
+            for video in listed_videos
+            if video.get("video_id")
+            and not video.get("blacklisted_by")
+            and not video.get("disqualifying_attributes")
+        ]
+
+        video_ids = [entry.get("video_id") for entry in approved_videos if entry.get("video_id")]
+        if not video_ids:
+            return []
+
+        favorite_map = await run_in_threadpool(
+            fetch_resource_labels_map, "video", video_ids, {"favorite"}
+        )
+        favorite_entries = [
+            entry
+            for entry in approved_videos
+            if entry.get("video_id")
+            and favorite_map.get(entry.get("video_id")) == "favorite"
+        ]
+
+        return await _build_video_options(favorite_entries, limit=limit)
+
     @app.get("/videos/random", name="list_random_videos")
     async def list_random_videos(limit: int = Query(default=5, ge=1, le=20)) -> dict[str, Any]:
         """Return a random selection of approved videos."""
@@ -892,6 +949,26 @@ def create_app() -> FastAPI:
         videos = await _random_video_options(limit=limit)
         await _record_history_event(
             "videos.random",
+            {
+                "limit": limit,
+                "video_ids": [
+                    entry.get("video_id")
+                    for entry in videos
+                    if isinstance(entry.get("video_id"), str)
+                ],
+            },
+        )
+        return {"videos": videos}
+
+    @app.get("/videos/favorites", name="list_favorite_videos")
+    async def list_favorite_videos(
+        limit: int = Query(default=5, ge=1, le=20)
+    ) -> dict[str, Any]:
+        """Return a random selection of favorited videos."""
+
+        videos = await _favorite_video_options(limit=limit)
+        await _record_history_event(
+            "videos.favorites",
             {
                 "limit": limit,
                 "video_ids": [
