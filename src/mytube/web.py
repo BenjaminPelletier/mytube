@@ -722,11 +722,10 @@ def create_app() -> FastAPI:
         )
 
     async def _record_history_event(
-        endpoint: str, event_type: str, metadata: dict[str, Any] | None = None
+        event_type: str, metadata: dict[str, Any] | None = None
     ) -> None:
         await run_in_threadpool(
             log_history_event,
-            endpoint,
             event_type,
             metadata or {},
         )
@@ -783,7 +782,6 @@ def create_app() -> FastAPI:
 
         videos = await _random_video_options(limit=limit)
         await _record_history_event(
-            "/videos/random",
             "videos.random",
             {
                 "limit": limit,
@@ -837,7 +835,6 @@ def create_app() -> FastAPI:
             )
 
         await _record_history_event(
-            "/lounge/play",
             "lounge.play",
             {"video_id": video_id, "screen_id": screen_id},
         )
@@ -910,7 +907,6 @@ def create_app() -> FastAPI:
             )
 
         await _record_history_event(
-            "/lounge/pause",
             "lounge.pause",
             {"screen_id": screen_id},
         )
@@ -970,7 +966,6 @@ def create_app() -> FastAPI:
             )
 
         await _record_history_event(
-            "/lounge/resume",
             "lounge.resume",
             {"screen_id": screen_id},
         )
@@ -1147,7 +1142,6 @@ def create_app() -> FastAPI:
             formatted_events.append(
                 {
                     "id": event.get("id"),
-                    "endpoint": event.get("endpoint"),
                     "event_type": event.get("event_type"),
                     "created_at": created_at_display,
                     "metadata_json": metadata_json,

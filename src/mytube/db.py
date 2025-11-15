@@ -140,7 +140,6 @@ class HistoryEvent(SQLModel, table=True):
     __tablename__ = "history_events"
 
     id: int | None = Field(default=None, primary_key=True)
-    endpoint: str = Field(nullable=False)
     event_type: str = Field(nullable=False)
     created_at: str = Field(nullable=False, index=True)
     metadata_json: str = Field(sa_column=Column("metadata_json", Text, nullable=False))
@@ -926,7 +925,7 @@ def fetch_all_videos() -> list[dict]:
     ]
 
 
-def log_history_event(endpoint: str, event_type: str, metadata: dict[str, Any] | None = None) -> None:
+def log_history_event(event_type: str, metadata: dict[str, Any] | None = None) -> None:
     """Persist a viewing history event in the database."""
 
     metadata = metadata or {}
@@ -937,7 +936,6 @@ def log_history_event(endpoint: str, event_type: str, metadata: dict[str, Any] |
     with Session(engine) as session:
         session.add(
             HistoryEvent(
-                endpoint=endpoint,
                 event_type=event_type,
                 created_at=created_at,
                 metadata_json=payload,
@@ -968,7 +966,6 @@ def fetch_history(limit: int = 20) -> list[dict[str, Any]]:
         events.append(
             {
                 "id": record.id,
-                "endpoint": record.endpoint,
                 "event_type": record.event_type,
                 "created_at": record.created_at,
                 "metadata": metadata,

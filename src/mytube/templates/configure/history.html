@@ -7,7 +7,6 @@
     <thead>
       <tr>
         <th scope="col">When</th>
-        <th scope="col">Endpoint</th>
         <th scope="col">Event</th>
         <th scope="col">Details</th>
       </tr>
@@ -16,7 +15,6 @@
       {% for event in events %}
       <tr>
         <td data-label="When">{{ event.created_at }}</td>
-        <td data-label="Endpoint">{{ event.endpoint }}</td>
         <td data-label="Event">{{ event.event_type }}</td>
         <td data-label="Details"><pre>{{ event.metadata_json }}</pre></td>
       </tr>
