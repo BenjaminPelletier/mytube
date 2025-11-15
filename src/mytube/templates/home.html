@@ -50,6 +50,9 @@
         const refreshButton = document.getElementById("refresh-videos");
         const emptyState = document.getElementById("video-empty");
         const nowPlayingSection = document.querySelector(".now-playing");
+        const nowPlayingCaption = nowPlayingSection
+          ? nowPlayingSection.querySelector(".caption")
+          : null;
         const nowPlayingTitle = nowPlayingSection ? nowPlayingSection.querySelector(".title") : null;
         const nowPlayingThumbnail = nowPlayingSection ? nowPlayingSection.querySelector(".thumbnail") : null;
         const nowPlayingStatus = nowPlayingSection ? nowPlayingSection.querySelector(".status-message") : null;
@@ -64,6 +67,31 @@
         const resumeApiUrl = "{{ resume_api_url }}";
         const favoriteApiTemplate = "{{ favorite_api_url }}";
         const flagApiTemplate = "{{ flag_api_url }}";
+
+        const playbackCaptions = {
+          playing: "Playing:",
+          paused: "Paused:",
+          playingPending: "Playing...",
+          pausing: "Pausing...",
+          resuming: "Resuming...",
+        };
+
+        let stableNowPlayingCaption = playbackCaptions.playing;
+
+        const setNowPlayingCaption = (caption, { stable = false } = {}) => {
+          if (!(nowPlayingCaption instanceof HTMLElement)) {
+            return;
+          }
+          const text = caption || stableNowPlayingCaption || playbackCaptions.playing;
+          nowPlayingCaption.textContent = text;
+          if (stable) {
+            stableNowPlayingCaption = text;
+          }
+        };
+
+        const resetNowPlayingCaption = () => {
+          setNowPlayingCaption(stableNowPlayingCaption);
+        };
 
         const initialVideoId = (() => {
           const value = {{ play_video_id|tojson }};
@@ -262,12 +290,20 @@
           return fallback;
         };
 
-        const handlePlaybackControl = async (apiUrl, pendingMessage, fallbackMessage) => {
+        const handlePlaybackControl = async ({
+          apiUrl,
+          fallbackMessage,
+          pendingCaption,
+          successCaption,
+        } = {}) => {
           if (!apiUrl) {
             return;
           }
 
-          setNowPlayingStatus(pendingMessage);
+          setNowPlayingStatus("");
+          if (pendingCaption) {
+            setNowPlayingCaption(pendingCaption);
+          }
           setNowPlayingBusy(true);
 
           try {
@@ -289,14 +325,19 @@
                 response.statusText || fallbackMessage
               );
               setNowPlayingStatus(message || fallbackMessage);
+              resetNowPlayingCaption();
               return;
             }
 
             setNowPlayingStatus("");
+            if (successCaption) {
+              setNowPlayingCaption(successCaption, { stable: true });
+            }
           } catch (error) {
             const message = error instanceof Error ? error.message : fallbackMessage;
             setNowPlayingStatus(message);
             console.error(error);
+            resetNowPlayingCaption();
           } finally {
             setNowPlayingBusy(false);
           }
@@ -325,7 +366,8 @@
           };
 
           applyNowPlayingDetails(fallbackDetails);
-          setNowPlayingStatus("Playing...");
+          setNowPlayingStatus("");
+          setNowPlayingCaption(playbackCaptions.playingPending);
           setNowPlayingBusy(true);
 
           try {
@@ -351,6 +393,7 @@
                 response.statusText || "Unable to play video."
               );
               setNowPlayingStatus(message);
+              resetNowPlayingCaption();
               return;
             }
 
@@ -383,10 +426,12 @@
             }
 
             setNowPlayingStatus("");
+            setNowPlayingCaption(playbackCaptions.playing, { stable: true });
           } catch (error) {
             const message = error instanceof Error ? error.message : "Unable to play video.";
             setNowPlayingStatus(message);
             console.error(error);
+            resetNowPlayingCaption();
           } finally {
             setNowPlayingBusy(false);
           }
@@ -430,22 +475,24 @@
         if (pauseButton instanceof HTMLButtonElement) {
           pauseButton.addEventListener("click", (event) => {
             event.preventDefault();
-            void handlePlaybackControl(
-              pauseApiUrl,
-              "Pausing...",
-              "Unable to pause playback."
-            );
+            void handlePlaybackControl({
+              apiUrl: pauseApiUrl,
+              fallbackMessage: "Unable to pause playback.",
+              pendingCaption: playbackCaptions.pausing,
+              successCaption: playbackCaptions.paused,
+            });
           });
         }
 
         if (resumeButton instanceof HTMLButtonElement) {
           resumeButton.addEventListener("click", (event) => {
             event.preventDefault();
-            void handlePlaybackControl(
-              resumeApiUrl,
-              "Resuming...",
-              "Unable to resume playback."
-            );
+            void handlePlaybackControl({
+              apiUrl: resumeApiUrl,
+              fallbackMessage: "Unable to resume playback.",
+              pendingCaption: playbackCaptions.resuming,
+              successCaption: playbackCaptions.playing,
+            });
           });
         }
 
