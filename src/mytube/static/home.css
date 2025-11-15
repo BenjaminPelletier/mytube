@@ -83,11 +83,12 @@ p.description {
 
 .video-options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 1.5rem;
   margin: 0 0 1.5rem;
   padding: 0;
   list-style: none;
+  justify-content: center;
 }
 
 .video-option {
@@ -95,9 +96,8 @@ p.description {
   flex-direction: column;
   justify-content: flex-start;
   align-items: stretch;
-  width: 100%;
-  max-width: 320px;
-  margin: 0 auto;
+  width: min(100%, 320px);
+  margin: 0;
   padding: 1rem;
   border: 1px solid #e0e0e0;
   border-radius: 11px;
@@ -105,6 +105,7 @@ p.description {
   text-decoration: none;
   color: inherit;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
