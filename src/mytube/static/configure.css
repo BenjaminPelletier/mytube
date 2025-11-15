@@ -209,6 +209,23 @@ h1 {
   border-collapse: collapse;
   font-size: 0.95rem;
   line-height: 1.35;
+  table-layout: fixed;
+}
+
+.videos-table col.videos-table-play-column {
+  width: 3rem;
+}
+
+.videos-table col.videos-table-channel-column {
+  width: 28%;
+}
+
+.videos-table col.videos-table-title-column {
+  width: auto;
+}
+
+.videos-table col.videos-table-actions-column {
+  width: 4rem;
 }
 
 .videos-table th,
@@ -246,6 +263,7 @@ h1 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 0;
 }
 
 .videos-table a {
