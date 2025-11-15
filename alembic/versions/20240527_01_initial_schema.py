@@ -83,7 +83,7 @@ def upgrade() -> None:
         sa.Column("resource_id", sa.String(), nullable=False),
         sa.Column("label", sa.String(), nullable=False),
         sa.CheckConstraint(
-            "label IN ('whitelisted', 'blacklisted')",
+            "label IN ('whitelisted', 'blacklisted', 'favorite', 'flagged')",
             name="ck_resource_labels_label",
         ),
         sa.PrimaryKeyConstraint("resource_type", "resource_id"),

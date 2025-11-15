@@ -5,15 +5,6 @@ body {
   max-width: 72rem;
 }
 
-h1 {
-  margin-bottom: 0.25rem;
-}
-
-p.description {
-  color: #333;
-  margin-top: 0;
-}
-
 .now-playing {
   margin: 1.25rem 0 1.75rem;
   padding: 1rem;
@@ -79,6 +70,38 @@ p.description {
   opacity: 0.6;
   cursor: wait;
   box-shadow: none;
+}
+
+.now-playing .favorite-button {
+  font-size: 1.5rem;
+  color: #666;
+  transition: color 0.2s ease;
+}
+
+.now-playing .favorite-button.is-favorite {
+  color: #e0245e;
+}
+
+.now-playing .favorite-button.is-favorite:hover,
+.now-playing .favorite-button.is-favorite:focus-visible {
+  color: #c2185b;
+}
+
+.now-playing .flag-button {
+  font-size: 1.25rem;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.now-playing .flag-button.is-flagged {
+  background: #d32f2f;
+  border-color: #b71c1c;
+  color: #fff;
+}
+
+.now-playing .flag-button.is-flagged:hover,
+.now-playing .flag-button.is-flagged:focus-visible {
+  background: #b71c1c;
+  border-color: #8e0000;
 }
 
 .video-options {

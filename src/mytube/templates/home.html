@@ -6,8 +6,6 @@
     <link rel="stylesheet" href="{{ url_for('static', path='home.css') }}">
   </head>
   <body>
-    <h1>MyTube Remote</h1>
-    <p class="description">Kick off the featured recommendation on your Chromecast.</p>
     <section class="now-playing" aria-live="polite" hidden>
       <p class="caption">Playing:</p>
       <img class="thumbnail" alt="" hidden>
@@ -16,6 +14,20 @@
       <div class="playback-controls" hidden>
         <button type="button" class="playback-button resume-button" aria-label="Resume video">▶</button>
         <button type="button" class="playback-button pause-button" aria-label="Pause video">⏸</button>
+        <button
+          type="button"
+          class="playback-button favorite-button"
+          aria-label="Add to favorites"
+          aria-pressed="false"
+          disabled
+        >♡</button>
+        <button
+          type="button"
+          class="playback-button flag-button"
+          aria-label="Flag video"
+          aria-pressed="false"
+          disabled
+        >⚑</button>
       </div>
     </section>
     <section class="video-options" aria-live="polite">
@@ -33,6 +45,7 @@
     <p class="empty-state" id="video-empty">Loading videos…</p>
     <script>
       (() => {
+        const VIDEO_ID_PLACEHOLDER = "__VIDEO_ID__";
         const videoContainer = document.querySelector(".video-options");
         const refreshButton = document.getElementById("refresh-videos");
         const emptyState = document.getElementById("video-empty");
@@ -43,10 +56,14 @@
         const nowPlayingControls = nowPlayingSection ? nowPlayingSection.querySelector(".playback-controls") : null;
         const pauseButton = nowPlayingSection ? nowPlayingSection.querySelector(".pause-button") : null;
         const resumeButton = nowPlayingSection ? nowPlayingSection.querySelector(".resume-button") : null;
+        const favoriteButton = nowPlayingSection ? nowPlayingSection.querySelector(".favorite-button") : null;
+        const flagButton = nowPlayingSection ? nowPlayingSection.querySelector(".flag-button") : null;
         const videosApiUrl = "{{ videos_api_url }}";
         const playApiUrl = "{{ play_api_url }}";
         const pauseApiUrl = "{{ pause_api_url }}";
         const resumeApiUrl = "{{ resume_api_url }}";
+        const favoriteApiTemplate = "{{ favorite_api_url }}";
+        const flagApiTemplate = "{{ flag_api_url }}";
 
         const playbackButtons = [];
         if (pauseButton instanceof HTMLButtonElement) {
@@ -55,6 +72,67 @@
         if (resumeButton instanceof HTMLButtonElement) {
           playbackButtons.push(resumeButton);
         }
+
+        const parseBoolean = (value) => value === true || value === "true";
+        const buildVideoActionUrl = (template, videoId) => {
+          if (!template || !videoId) {
+            return "";
+          }
+          return template.replace(VIDEO_ID_PLACEHOLDER, encodeURIComponent(videoId));
+        };
+
+        const updateFavoriteButtonState = (isFavorite) => {
+          if (!(favoriteButton instanceof HTMLButtonElement)) {
+            return;
+          }
+          const active = Boolean(isFavorite);
+          favoriteButton.textContent = active ? "♥" : "♡";
+          favoriteButton.classList.toggle("is-favorite", active);
+          favoriteButton.setAttribute("aria-pressed", active ? "true" : "false");
+          favoriteButton.setAttribute(
+            "aria-label",
+            active ? "Remove from favorites" : "Add to favorites"
+          );
+        };
+
+        const updateFlagButtonState = (isFlagged) => {
+          if (!(flagButton instanceof HTMLButtonElement)) {
+            return;
+          }
+          const active = Boolean(isFlagged);
+          flagButton.classList.toggle("is-flagged", active);
+          flagButton.setAttribute("aria-pressed", active ? "true" : "false");
+          flagButton.setAttribute("aria-label", active ? "Unflag video" : "Flag video");
+        };
+
+        const setToggleButtonAvailability = (hasVideo) => {
+          if (favoriteButton instanceof HTMLButtonElement) {
+            if (!hasVideo) {
+              favoriteButton.removeAttribute("aria-busy");
+              updateFavoriteButtonState(false);
+            }
+            favoriteButton.disabled = !hasVideo;
+          }
+          if (flagButton instanceof HTMLButtonElement) {
+            if (!hasVideo) {
+              flagButton.removeAttribute("aria-busy");
+              updateFlagButtonState(false);
+            }
+            flagButton.disabled = !hasVideo;
+          }
+        };
+
+        const updateVideoOptionState = (videoId, property, isActive) => {
+          if (!videoContainer || !videoId) {
+            return;
+          }
+          const options = videoContainer.querySelectorAll(".video-option[data-video-id]");
+          options.forEach((option) => {
+            if (option instanceof HTMLElement && option.dataset.videoId === videoId) {
+              option.dataset[property] = isActive ? "true" : "false";
+            }
+          });
+        };
 
         const setPlaybackControlsDisabled = (isDisabled) => {
           playbackButtons.forEach((button) => {
@@ -65,6 +143,28 @@
               button.removeAttribute("aria-busy");
             }
           });
+          if (!(nowPlayingSection instanceof HTMLElement)) {
+            return;
+          }
+          const hasVideo = Boolean(nowPlayingSection.dataset.videoId);
+          if (favoriteButton instanceof HTMLButtonElement) {
+            if (isDisabled) {
+              favoriteButton.disabled = true;
+              favoriteButton.setAttribute("aria-busy", "true");
+            } else {
+              favoriteButton.removeAttribute("aria-busy");
+              favoriteButton.disabled = !hasVideo;
+            }
+          }
+          if (flagButton instanceof HTMLButtonElement) {
+            if (isDisabled) {
+              flagButton.disabled = true;
+              flagButton.setAttribute("aria-busy", "true");
+            } else {
+              flagButton.removeAttribute("aria-busy");
+              flagButton.disabled = !hasVideo;
+            }
+          }
         };
 
         if (!videoContainer || !videosApiUrl) {
@@ -79,9 +179,14 @@
           const title = typeof details.title === "string" ? details.title : "";
           const thumbnailUrl = typeof details.thumbnail_url === "string" ? details.thumbnail_url : "";
           const videoId = typeof details.video_id === "string" ? details.video_id : "";
+          const favorite = parseBoolean(details.favorite);
+          const flagged = parseBoolean(details.flagged);
+          const hasVideo = Boolean(videoId);
 
           nowPlayingSection.hidden = false;
           nowPlayingSection.dataset.videoId = videoId;
+          nowPlayingSection.dataset.favorite = favorite ? "true" : "false";
+          nowPlayingSection.dataset.flagged = flagged ? "true" : "false";
 
           if (nowPlayingControls) {
             nowPlayingControls.hidden = !videoId;
@@ -108,6 +213,10 @@
               nowPlayingThumbnail.hidden = true;
             }
           }
+
+          updateFavoriteButtonState(hasVideo && favorite);
+          updateFlagButtonState(hasVideo && flagged);
+          setToggleButtonAvailability(hasVideo);
         };
 
         const setNowPlayingStatus = (message) => {
@@ -185,10 +294,7 @@
           }
         };
 
-        const handlePlayVideo = async (event) => {
-          event.preventDefault();
-
-          const option = event.currentTarget;
+        async function playVideoOptionElement(option) {
           if (!(option instanceof HTMLElement)) {
             return;
           }
@@ -206,6 +312,8 @@
               option.dataset.thumbnailUrl ||
               (option.querySelector(".video-thumbnail")?.getAttribute("src") || ""),
             video_id: videoId,
+            favorite: parseBoolean(option.dataset.favorite),
+            flagged: parseBoolean(option.dataset.flagged),
           };
 
           applyNowPlayingDetails(pendingDetails);
@@ -254,6 +362,14 @@
                     typeof playingData.video_id === "string" && playingData.video_id
                       ? playingData.video_id
                       : pendingDetails.video_id,
+                  favorite:
+                    typeof playingData.favorite === "boolean"
+                      ? playingData.favorite
+                      : pendingDetails.favorite,
+                  flagged:
+                    typeof playingData.flagged === "boolean"
+                      ? playingData.flagged
+                      : pendingDetails.flagged,
                 });
               }
             }
@@ -266,6 +382,17 @@
           } finally {
             setNowPlayingBusy(false);
           }
+        }
+
+        const handlePlayVideo = async (event) => {
+          event.preventDefault();
+
+          const option = event.currentTarget;
+          if (!(option instanceof HTMLElement)) {
+            return;
+          }
+
+          await playVideoOptionElement(option);
         };
 
         if (pauseButton instanceof HTMLButtonElement) {
@@ -336,6 +463,8 @@
             const videoId = typeof video.video_id === "string" ? video.video_id : "";
             const thumbnailUrl = typeof video.thumbnail_url === "string" ? video.thumbnail_url : "";
             const title = typeof video.title === "string" ? video.title : "";
+            const isFavorite = Boolean(video.favorite);
+            const isFlagged = Boolean(video.flagged);
 
             if (!videoId || !thumbnailUrl || !title) {
               return;
@@ -348,6 +477,8 @@
             option.dataset.videoId = videoId;
             option.dataset.videoTitle = title;
             option.dataset.thumbnailUrl = thumbnailUrl;
+            option.dataset.favorite = isFavorite ? "true" : "false";
+            option.dataset.flagged = isFlagged ? "true" : "false";
 
             const thumbnail = document.createElement("img");
             thumbnail.className = "video-thumbnail";
@@ -374,7 +505,7 @@
           }
         };
 
-        const loadVideos = async () => {
+        async function loadVideos() {
           setLoadingState(true);
           try {
             const response = await fetch(videosApiUrl, {
@@ -400,15 +531,140 @@
               refreshButton.hidden = false;
             }
           }
-        };
+        }
 
         if (refreshButton) {
           refreshButton.addEventListener("click", () => {
-            loadVideos();
+            void loadVideos();
           });
         }
 
-        loadVideos();
+        if (favoriteButton instanceof HTMLButtonElement) {
+          favoriteButton.addEventListener("click", async (event) => {
+            event.preventDefault();
+            if (!nowPlayingSection) {
+              return;
+            }
+            const videoId = nowPlayingSection.dataset.videoId;
+            if (!videoId) {
+              return;
+            }
+            const requestUrl = buildVideoActionUrl(favoriteApiTemplate, videoId);
+            if (!requestUrl) {
+              return;
+            }
+
+            favoriteButton.disabled = true;
+            favoriteButton.setAttribute("aria-busy", "true");
+
+            try {
+              const response = await fetch(requestUrl, {
+                method: "POST",
+                headers: { Accept: "application/json" },
+              });
+
+              let payload = null;
+              try {
+                payload = await response.json();
+              } catch (error) {
+                payload = null;
+              }
+
+              if (!response.ok || !payload || typeof payload.favorite !== "boolean") {
+                const message = extractErrorMessage(
+                  payload,
+                  response.statusText || "Unable to update favorite."
+                );
+                setNowPlayingStatus(message || "Unable to update favorite.");
+                return;
+              }
+
+              const isFavorite = Boolean(payload.favorite);
+              nowPlayingSection.dataset.favorite = isFavorite ? "true" : "false";
+              updateFavoriteButtonState(isFavorite);
+              updateVideoOptionState(videoId, "favorite", isFavorite);
+              setNowPlayingStatus("");
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : "Unable to update favorite.";
+              setNowPlayingStatus(message);
+              console.error(error);
+            } finally {
+              favoriteButton.removeAttribute("aria-busy");
+              setToggleButtonAvailability(Boolean(nowPlayingSection.dataset.videoId));
+            }
+          });
+        }
+
+        if (flagButton instanceof HTMLButtonElement) {
+          flagButton.addEventListener("click", async (event) => {
+            event.preventDefault();
+            if (!nowPlayingSection) {
+              return;
+            }
+            const videoId = nowPlayingSection.dataset.videoId;
+            if (!videoId) {
+              return;
+            }
+            const requestUrl = buildVideoActionUrl(flagApiTemplate, videoId);
+            if (!requestUrl) {
+              return;
+            }
+
+            const wasFlagged = parseBoolean(nowPlayingSection.dataset.flagged);
+            flagButton.disabled = true;
+            flagButton.setAttribute("aria-busy", "true");
+
+            try {
+              const response = await fetch(requestUrl, {
+                method: "POST",
+                headers: { Accept: "application/json" },
+              });
+
+              let payload = null;
+              try {
+                payload = await response.json();
+              } catch (error) {
+                payload = null;
+              }
+
+              if (!response.ok || !payload || typeof payload.flagged !== "boolean") {
+                const message = extractErrorMessage(
+                  payload,
+                  response.statusText || "Unable to update flag."
+                );
+                setNowPlayingStatus(message || "Unable to update flag.");
+                return;
+              }
+
+              const isFlagged = Boolean(payload.flagged);
+              nowPlayingSection.dataset.flagged = isFlagged ? "true" : "false";
+              updateFlagButtonState(isFlagged);
+              updateVideoOptionState(videoId, "flagged", isFlagged);
+              setNowPlayingStatus("");
+
+              if (isFlagged && !wasFlagged) {
+                const firstOption = videoContainer?.querySelector(
+                  ".video-option[data-video-id]"
+                );
+                if (firstOption instanceof HTMLElement) {
+                  await playVideoOptionElement(firstOption);
+                }
+                await loadVideos();
+              }
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : "Unable to update flag.";
+              setNowPlayingStatus(message);
+              console.error(error);
+            } finally {
+              flagButton.removeAttribute("aria-busy");
+              setToggleButtonAvailability(Boolean(nowPlayingSection.dataset.videoId));
+            }
+          });
+        }
+
+        void loadVideos();
       })();
     </script>
   </body>
