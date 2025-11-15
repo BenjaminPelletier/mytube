@@ -65,6 +65,14 @@
         const favoriteApiTemplate = "{{ favorite_api_url }}";
         const flagApiTemplate = "{{ flag_api_url }}";
 
+        const initialVideoId = (() => {
+          const value = {{ play_video_id|tojson }};
+          if (typeof value === "string") {
+            return value.trim();
+          }
+          return "";
+        })();
+
         const playbackButtons = [];
         if (pauseButton instanceof HTMLButtonElement) {
           playbackButtons.push(pauseButton);
@@ -294,29 +302,29 @@
           }
         };
 
-        async function playVideoOptionElement(option) {
-          if (!(option instanceof HTMLElement)) {
-            return;
-          }
-
-          const videoId = option.dataset.videoId;
+        async function playVideo(videoId, pendingDetails = {}) {
           if (!videoId || !playApiUrl) {
             return;
           }
 
-          const pendingDetails = {
-            title:
-              option.dataset.videoTitle ||
-              (option.querySelector(".video-title")?.textContent || ""),
-            thumbnail_url:
-              option.dataset.thumbnailUrl ||
-              (option.querySelector(".video-thumbnail")?.getAttribute("src") || ""),
+          const pendingTitle =
+            typeof pendingDetails.title === "string" ? pendingDetails.title : "";
+          const pendingThumbnail =
+            typeof pendingDetails.thumbnail_url === "string"
+              ? pendingDetails.thumbnail_url
+              : "";
+          const pendingFavorite = parseBoolean(pendingDetails.favorite);
+          const pendingFlagged = parseBoolean(pendingDetails.flagged);
+
+          const fallbackDetails = {
+            title: pendingTitle,
+            thumbnail_url: pendingThumbnail,
             video_id: videoId,
-            favorite: parseBoolean(option.dataset.favorite),
-            flagged: parseBoolean(option.dataset.flagged),
+            favorite: pendingFavorite,
+            flagged: pendingFlagged,
           };
 
-          applyNowPlayingDetails(pendingDetails);
+          applyNowPlayingDetails(fallbackDetails);
           setNowPlayingStatus("Playing...");
           setNowPlayingBusy(true);
 
@@ -353,23 +361,23 @@
                   title:
                     typeof playingData.title === "string" && playingData.title
                       ? playingData.title
-                      : pendingDetails.title,
+                      : fallbackDetails.title,
                   thumbnail_url:
                     typeof playingData.thumbnail_url === "string" && playingData.thumbnail_url
                       ? playingData.thumbnail_url
-                      : pendingDetails.thumbnail_url,
+                      : fallbackDetails.thumbnail_url,
                   video_id:
                     typeof playingData.video_id === "string" && playingData.video_id
                       ? playingData.video_id
-                      : pendingDetails.video_id,
+                      : fallbackDetails.video_id,
                   favorite:
                     typeof playingData.favorite === "boolean"
                       ? playingData.favorite
-                      : pendingDetails.favorite,
+                      : fallbackDetails.favorite,
                   flagged:
                     typeof playingData.flagged === "boolean"
                       ? playingData.flagged
-                      : pendingDetails.flagged,
+                      : fallbackDetails.flagged,
                 });
               }
             }
@@ -382,6 +390,30 @@
           } finally {
             setNowPlayingBusy(false);
           }
+        }
+
+        async function playVideoOptionElement(option) {
+          if (!(option instanceof HTMLElement)) {
+            return;
+          }
+
+          const videoId = option.dataset.videoId;
+          if (!videoId) {
+            return;
+          }
+
+          const pendingDetails = {
+            title:
+              option.dataset.videoTitle ||
+              (option.querySelector(".video-title")?.textContent || ""),
+            thumbnail_url:
+              option.dataset.thumbnailUrl ||
+              (option.querySelector(".video-thumbnail")?.getAttribute("src") || ""),
+            favorite: parseBoolean(option.dataset.favorite),
+            flagged: parseBoolean(option.dataset.flagged),
+          };
+
+          await playVideo(videoId, pendingDetails);
         }
 
         const handlePlayVideo = async (event) => {
@@ -662,6 +694,10 @@
               setToggleButtonAvailability(Boolean(nowPlayingSection.dataset.videoId));
             }
           });
+        }
+
+        if (initialVideoId) {
+          void playVideo(initialVideoId);
         }
 
         void loadVideos();
