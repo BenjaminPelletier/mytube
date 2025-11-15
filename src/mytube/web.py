@@ -726,7 +726,7 @@ def create_app() -> FastAPI:
     if static_directory.exists():
         app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
-    def _render(request: Request) -> HTMLResponse:
+    def _render(request: Request, *, play_video_id: str | None = None) -> HTMLResponse:
         return templates.TemplateResponse(
             "home.html",
             {
@@ -741,6 +741,7 @@ def create_app() -> FastAPI:
                 "flag_api_url": app.url_path_for(
                     "toggle_flag", video_id="__VIDEO_ID__"
                 ),
+                "play_video_id": play_video_id or "",
             },
         )
 
@@ -754,8 +755,14 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/", response_class=HTMLResponse)
-    async def home(request: Request) -> HTMLResponse:
-        return _render(request)
+    async def home(
+        request: Request,
+        play: str | None = Query(default=None, description="Video ID to play immediately."),
+    ) -> HTMLResponse:
+        play_video_id = (play or "").strip()
+        if not play_video_id:
+            play_video_id = None
+        return _render(request, play_video_id=play_video_id)
 
     async def _fetch_video_state_flags(
         video_ids: list[str],
