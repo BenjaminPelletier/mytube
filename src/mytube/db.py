@@ -134,6 +134,18 @@ class Setting(SQLModel, table=True):
     value: str = Field(sa_column=Column("value", Text, nullable=False))
 
 
+class HistoryEvent(SQLModel, table=True):
+    """Record of application viewing activity events."""
+
+    __tablename__ = "history_events"
+
+    id: int | None = Field(default=None, primary_key=True)
+    endpoint: str = Field(nullable=False)
+    event_type: str = Field(nullable=False)
+    created_at: str = Field(nullable=False, index=True)
+    metadata_json: str = Field(sa_column=Column("metadata_json", Text, nullable=False))
+
+
 def initialize_database() -> None:
     """Ensure the playlist, playlist item, channel, and resource tables exist."""
 
@@ -914,6 +926,57 @@ def fetch_all_videos() -> list[dict]:
     ]
 
 
+def log_history_event(endpoint: str, event_type: str, metadata: dict[str, Any] | None = None) -> None:
+    """Persist a viewing history event in the database."""
+
+    metadata = metadata or {}
+    created_at = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(metadata, separators=(",", ":"))
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        session.add(
+            HistoryEvent(
+                endpoint=endpoint,
+                event_type=event_type,
+                created_at=created_at,
+                metadata_json=payload,
+            )
+        )
+        session.commit()
+
+
+def fetch_history(limit: int = 20) -> list[dict[str, Any]]:
+    """Return the most recent history events."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(HistoryEvent)
+            .order_by(HistoryEvent.created_at.desc())
+            .limit(limit)
+        )
+        records = session.exec(statement).all()
+
+    events: list[dict[str, Any]] = []
+    for record in records:
+        metadata: dict[str, Any]
+        try:
+            metadata = json.loads(record.metadata_json or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        events.append(
+            {
+                "id": record.id,
+                "endpoint": record.endpoint,
+                "event_type": record.event_type,
+                "created_at": record.created_at,
+                "metadata": metadata,
+            }
+        )
+    return events
+
+
 __all__ = [
     "initialize_database",
     "save_playlist_items",
@@ -934,5 +997,7 @@ __all__ = [
     "fetch_listed_videos",
     "fetch_listed_video",
     "repopulate_listed_videos",
+    "log_history_event",
+    "fetch_history",
 ]
 
