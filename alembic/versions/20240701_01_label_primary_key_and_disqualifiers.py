@@ -14,72 +14,83 @@ PRIMARY_KEY_NAME = "pk_resource_labels"
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("listed_videos", recreate="always") as batch_op:
-        batch_op.add_column(sa.Column("disqualifying_attributes", sa.Text(), nullable=True))
+    op.add_column(
+        "listed_videos",
+        sa.Column("disqualifying_attributes", sa.Text(), nullable=True),
+    )
 
-    with op.batch_alter_table("resource_labels", recreate="always") as batch_op:
-        batch_op.drop_constraint(CHECK_CONSTRAINT_NAME, type_="check")
-        batch_op.drop_constraint(None, type_="primary")
-        batch_op.create_primary_key(
-            PRIMARY_KEY_NAME, ["resource_type", "resource_id", "label"]
-        )
-        batch_op.create_check_constraint(
-            CHECK_CONSTRAINT_NAME,
+    op.create_table(
+        "resource_labels__tmp",
+        sa.Column("resource_type", sa.String(), nullable=False),
+        sa.Column("resource_id", sa.String(), nullable=False),
+        sa.Column("label", sa.String(), nullable=False),
+        sa.PrimaryKeyConstraint(
+            "resource_type", "resource_id", "label", name=PRIMARY_KEY_NAME
+        ),
+        sa.CheckConstraint(
             "label IN ('whitelisted', 'blacklisted', 'favorite', 'flagged')",
-        )
+            name=CHECK_CONSTRAINT_NAME,
+        ),
+    )
 
     op.execute(
         sa.text(
             """
-            UPDATE resource_labels
-            SET resource_type = 'video'
-            WHERE resource_type IN ('video.favorite', 'video.flagged')
+            INSERT INTO resource_labels__tmp (resource_type, resource_id, label)
+            SELECT
+                CASE
+                    WHEN resource_type IN ('video.favorite', 'video.flagged')
+                        THEN 'video'
+                    ELSE resource_type
+                END AS resource_type,
+                resource_id,
+                label
+            FROM resource_labels
             """
         )
     )
+
+    op.drop_table("resource_labels")
+    op.rename_table("resource_labels__tmp", "resource_labels")
 
 
 def downgrade() -> None:
-    op.execute(
-        sa.text(
-            """
-            UPDATE resource_labels
-            SET resource_type = 'video.favorite'
-            WHERE resource_type = 'video' AND label = 'favorite'
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            UPDATE resource_labels
-            SET resource_type = 'video.flagged'
-            WHERE resource_type = 'video' AND label = 'flagged'
-            """
-        )
-    )
-
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM resource_labels
-            WHERE rowid NOT IN (
-                SELECT MIN(rowid)
-                FROM resource_labels
-                GROUP BY resource_type, resource_id
-            )
-            """
-        )
-    )
-
-    with op.batch_alter_table("resource_labels", recreate="always") as batch_op:
-        batch_op.drop_constraint(CHECK_CONSTRAINT_NAME, type_="check")
-        batch_op.drop_constraint(None, type_="primary")
-        batch_op.create_primary_key(PRIMARY_KEY_NAME, ["resource_type", "resource_id"])
-        batch_op.create_check_constraint(
-            CHECK_CONSTRAINT_NAME,
+    op.create_table(
+        "resource_labels__tmp",
+        sa.Column("resource_type", sa.String(), nullable=False),
+        sa.Column("resource_id", sa.String(), nullable=False),
+        sa.Column("label", sa.String(), nullable=False),
+        sa.PrimaryKeyConstraint("resource_type", "resource_id", name=PRIMARY_KEY_NAME),
+        sa.CheckConstraint(
             "label IN ('whitelisted', 'blacklisted', 'favorite', 'flagged')",
-        )
+            name=CHECK_CONSTRAINT_NAME,
+        ),
+    )
 
-    with op.batch_alter_table("listed_videos", recreate="always") as batch_op:
-        batch_op.drop_column("disqualifying_attributes")
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO resource_labels__tmp (resource_type, resource_id, label)
+            SELECT resource_type, resource_id, MIN(label) AS label
+            FROM (
+                SELECT
+                    CASE
+                        WHEN resource_type = 'video' AND label = 'favorite'
+                            THEN 'video.favorite'
+                        WHEN resource_type = 'video' AND label = 'flagged'
+                            THEN 'video.flagged'
+                        ELSE resource_type
+                    END AS resource_type,
+                    resource_id,
+                    label
+                FROM resource_labels
+            )
+            GROUP BY resource_type, resource_id
+            """
+        )
+    )
+
+    op.drop_table("resource_labels")
+    op.rename_table("resource_labels__tmp", "resource_labels")
+
+    op.drop_column("listed_videos", "disqualifying_attributes")
