@@ -199,6 +199,100 @@ h1 {
   font-weight: 600;
 }
 
+.videos-table-wrapper {
+  margin-top: 0.5rem;
+  overflow-x: auto;
+}
+
+.videos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.videos-table th,
+.videos-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+.videos-table thead th {
+  border-bottom: 1px solid #d0d7de;
+  color: #57606a;
+  font-weight: 600;
+}
+
+.videos-table tbody tr:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.videos-table tbody tr:nth-child(even) {
+  background: rgba(240, 246, 255, 0.8);
+}
+
+.videos-table-play {
+  width: 3rem;
+  text-align: center;
+}
+
+.videos-table-actions {
+  width: 4rem;
+  text-align: center;
+}
+
+.videos-table-channel,
+.videos-table-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.videos-table a {
+  color: inherit;
+}
+
+.videos-table a:hover,
+.videos-table a:focus {
+  color: #0969da;
+}
+
+.videos-table-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  text-decoration: none;
+}
+
+.videos-table-load-form {
+  margin: 0;
+}
+
+.videos-table-load-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.4rem;
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.videos-table-load-form button:hover,
+.videos-table-load-form button:focus {
+  background: #e9eef5;
+}
+
+.videos-table-vote {
+  margin-left: 0.35rem;
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;

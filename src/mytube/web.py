@@ -185,8 +185,8 @@ def _channels_overview_content(channels: list[dict[str, Any]]) -> list[dict[str,
     return items
 
 
-def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str]]:
-    items: list[dict[str, str]] = []
+def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str | None]]:
+    items: list[dict[str, str | None]] = []
     for video in videos:
         video_id = video.get("id") or ""
         if not video_id:
@@ -198,13 +198,22 @@ def _videos_overview_content(videos: list[dict[str, Any]]) -> list[dict[str, str
             if isinstance(channel_title_value, str) and channel_title_value.strip()
             else "Unknown channel"
         )
-        display_title = f"[{channel_title}] {title}"
         vote = _resource_vote(video.get("label"))
         encoded_id = quote(video_id, safe="")
+        has_raw_value = video.get("has_raw")
+        has_raw = bool(has_raw_value)
+        if not has_raw and "raw_json" in video:
+            has_raw = bool(video.get("raw_json"))
+        resource_url = f"/configure/videos/{encoded_id}"
         items.append(
             {
-                "title": display_title,
-                "url": f"/configure/videos/{encoded_id}",
+                "video_id": video_id,
+                "channel_title": channel_title,
+                "video_title": title,
+                "url": resource_url,
+                "play_url": f"/?play={encoded_id}",
+                "raw_url": f"{resource_url}/raw" if has_raw else None,
+                "load_url": f"{resource_url}/load",
                 "vote": vote,
             }
         )
@@ -1464,6 +1473,27 @@ def create_app() -> FastAPI:
             "view_resource",
             section="videos",
             resource_id=video_id,
+        )
+        return RedirectResponse(redirect_url, status_code=303)
+
+    @app.post(
+        "/configure/videos/{resource_id}/load",
+        name="load_video_resource",
+    )
+    async def load_video_resource(resource_id: str) -> Response:
+        normalized_id = resource_id.strip()
+        if not normalized_id:
+            raise HTTPException(status_code=400, detail="Resource ID is required")
+
+        video_record, error_message = await _load_video_record(normalized_id)
+        if not video_record:
+            detail = error_message or "Unable to load video details."
+            raise HTTPException(status_code=502, detail=detail)
+
+        redirect_url = app.url_path_for(
+            "view_resource",
+            section="videos",
+            resource_id=normalized_id,
         )
         return RedirectResponse(redirect_url, status_code=303)
 

@@ -17,6 +17,7 @@ def test_videos_overview_content_includes_channel_title() -> None:
             "title": "Sample Video",
             "channel_title": "Sample Channel",
             "label": None,
+            "has_raw": True,
         }
     ]
 
@@ -24,8 +25,13 @@ def test_videos_overview_content_includes_channel_title() -> None:
 
     assert items == [
         {
-            "title": "[Sample Channel] Sample Video",
+            "video_id": "video123",
+            "channel_title": "Sample Channel",
+            "video_title": "Sample Video",
             "url": "/configure/videos/video123",
+            "play_url": "/?play=video123",
+            "raw_url": "/configure/videos/video123/raw",
+            "load_url": "/configure/videos/video123/load",
             "vote": "",
         }
     ]
@@ -38,6 +44,7 @@ def test_videos_overview_content_falls_back_to_unknown_channel() -> None:
             "title": None,
             "channel_title": None,
             "label": "whitelisted",
+            "has_raw": False,
         }
     ]
 
@@ -45,8 +52,13 @@ def test_videos_overview_content_falls_back_to_unknown_channel() -> None:
 
     assert items == [
         {
-            "title": "[Unknown channel] video456",
+            "video_id": "video456",
+            "channel_title": "Unknown channel",
+            "video_title": "video456",
             "url": "/configure/videos/video456",
+            "play_url": "/?play=video456",
+            "raw_url": None,
+            "load_url": "/configure/videos/video456/load",
             "vote": "👍",
         }
     ]
