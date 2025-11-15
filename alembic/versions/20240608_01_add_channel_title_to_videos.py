@@ -12,7 +12,7 @@ from sqlalchemy import orm
 
 # revision identifiers, used by Alembic.
 revision = "20240608_01"
-down_revision = "20240527_01"
+down_revision = "20240603_01"
 branch_labels = None
 depends_on = None
 
