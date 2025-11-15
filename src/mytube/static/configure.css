@@ -179,6 +179,10 @@ h1 {
   margin-top: 0.2rem;
 }
 
+.resource-description {
+  white-space: pre-line;
+}
+
 .settings-section p {
   margin-top: 0.5rem;
 }
