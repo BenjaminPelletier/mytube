@@ -17,3 +17,11 @@ uv run mytube -- --host 127.0.0.1 --port 5000
 ```
 
 Navigating to the root page presents a single link. Clicking the link will request that the YouTube video `CYlon2tvywA` be played on the first Chromecast discovered on your local network.
+
+## Database migrations
+
+Schema changes between releases are handled with Alembic migrations. When upgrading to a new version that includes migrations, apply them before starting the server:
+
+```bash
+uv run alembic upgrade head
+```
