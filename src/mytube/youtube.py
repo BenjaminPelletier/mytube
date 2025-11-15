@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import urllib.error
@@ -15,6 +16,7 @@ import urllib.request
 from fastapi import HTTPException
 from starlette.concurrency import run_in_threadpool
 
+from .db import fetch_video_ids_missing_raw_json, save_video
 
 logger = logging.getLogger(__name__)
 
@@ -188,16 +190,98 @@ async def fetch_youtube_channels(
 
 
 async def fetch_youtube_videos(
-    video_id: str, api_key: str
+    video_ids: Iterable[str], api_key: str
 ) -> tuple[str, dict[str, Any]]:
-    """Fetch video data for a YouTube video."""
+    """Fetch video data for one or more YouTube videos."""
 
-    params = {
-        "part": "snippet,contentDetails,statistics",
-        "id": video_id,
-        "key": api_key,
-    }
-    return await run_in_threadpool(_youtube_api_request, "videos", params)
+    ids = [video_id for video_id in video_ids if isinstance(video_id, str) and video_id]
+    if not ids:
+        return "", {"items": []}
+
+    chunk_size = 50
+    combined_data: dict[str, Any] | None = None
+    all_items: list[dict[str, Any]] = []
+    last_url = ""
+
+    for index in range(0, len(ids), chunk_size):
+        chunk = ids[index : index + chunk_size]
+        params = {
+            "part": "snippet,contentDetails,statistics",
+            "id": ",".join(chunk),
+            "key": api_key,
+        }
+        last_url, data = await run_in_threadpool(
+            _youtube_api_request, "videos", params
+        )
+
+        items = data.get("items") if isinstance(data, dict) else None
+        if isinstance(items, list):
+            all_items.extend(item for item in items if isinstance(item, dict))
+        if combined_data is None:
+            combined_data = data if isinstance(data, dict) else None
+
+    if combined_data is None:
+        combined_data = {"items": []}
+
+    combined_data["items"] = list(all_items)
+    page_info = combined_data.get("pageInfo")
+    if isinstance(page_info, dict):
+        page_info["totalResults"] = len(all_items)
+
+    return last_url, combined_data
+
+
+async def fetch_youtube_video_with_bonus(
+    video_id: str, api_key: str
+) -> dict[str, Any] | None:
+    """Fetch a single video while backfilling cached videos missing raw JSON."""
+
+    normalized_id = video_id.strip() if isinstance(video_id, str) else ""
+    if not normalized_id:
+        return None
+
+    request_ids = [normalized_id]
+    remaining_slots = 50 - len(request_ids)
+    bonus_ids: list[str] = []
+    if remaining_slots > 0:
+
+        def _load_bonus() -> list[str]:
+            return fetch_video_ids_missing_raw_json(
+                remaining_slots, exclude=request_ids
+            )
+
+        bonus_ids = await run_in_threadpool(_load_bonus)
+        request_ids.extend(bonus_ids)
+
+    _, payload = await fetch_youtube_videos(request_ids, api_key)
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return None
+
+    requested_video: dict[str, Any] | None = None
+    bonus_set = {bonus_id for bonus_id in bonus_ids}
+    bonus_videos: list[dict[str, Any]] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get("id")
+        if isinstance(item_id, str) and item_id == normalized_id and requested_video is None:
+            requested_video = item
+            continue
+        if isinstance(item_id, str) and item_id in bonus_set:
+            bonus_videos.append(item)
+
+    if bonus_videos:
+        retrieved_at = datetime.now(timezone.utc)
+
+        def _persist_bonus() -> None:
+            for bonus_video in bonus_videos:
+                save_video(bonus_video, retrieved_at=retrieved_at)
+
+        await run_in_threadpool(_persist_bonus)
+
+    return requested_video
 
 
 __all__ = [
@@ -206,6 +290,7 @@ __all__ = [
     "fetch_youtube_playlist_items",
     "fetch_youtube_playlists",
     "fetch_youtube_videos",
+    "fetch_youtube_video_with_bonus",
     "load_youtube_api_key",
 ]
 
