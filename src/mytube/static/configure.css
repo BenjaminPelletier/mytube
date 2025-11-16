@@ -184,6 +184,85 @@ h1 {
   gap: 0.5rem;
 }
 
+.resource-label-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.resource-label-panel {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.resource-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.resource-label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: #e9f2ff;
+  color: #24292f;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.resource-label-badge.is-favorite {
+  background: #ffeef0;
+  color: #9a2131;
+}
+
+.resource-label-badge.is-flagged {
+  background: #fff3c0;
+  color: #8f3b00;
+}
+
+.resource-label-badge.is-inactive {
+  opacity: 0.65;
+  font-weight: 500;
+}
+
+.resource-label-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.resource-label-button {
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.55rem;
+  border: 1px solid #d0d7de;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.resource-label-button[aria-pressed="true"] {
+  background: #e9f2ff;
+  border-color: #8da8ff;
+}
+
+.resource-label-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.resource-label-status {
+  min-height: 1.25rem;
+  color: #7a1a1a;
+}
+
 .resource-flag,
 .videos-table-flag {
   color: #b11226;

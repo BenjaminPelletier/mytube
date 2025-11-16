@@ -687,6 +687,9 @@ def _video_resource_content(
     video: dict | None,
     listed_video: dict[str, Any] | None = None,
     reference_map: dict[str, dict[str, str]] | None = None,
+    *,
+    favorite: bool = False,
+    flagged: bool = False,
 ) -> dict[str, Any]:
     if not video:
         return {"video": None}
@@ -712,6 +715,8 @@ def _video_resource_content(
             "retrieved_at": video.get("retrieved_at") or "Unknown",
             "label": video.get("label"),
             "vote": _resource_vote(video.get("label")),
+            "favorite": bool(favorite),
+            "flagged": bool(flagged),
             "flagged_disqualifier": flagged_disqualifier,
             "disqualifying_attributes": disqualifying_attributes
             if isinstance(disqualifying_attributes, list)
@@ -2035,6 +2040,19 @@ def create_app() -> FastAPI:
                 fetch_listed_video, resource_id
             )
 
+            favorite_task = run_in_threadpool(
+                fetch_resource_label,
+                "video",
+                resource_id,
+                {"favorite"},
+            )
+            flagged_task = run_in_threadpool(
+                fetch_resource_label,
+                "video",
+                resource_id,
+                {"flagged"},
+            )
+
             reference_map: dict[str, dict[str, str]] = {}
             if listed_video:
                 identifiers: set[str] = set()
@@ -2053,8 +2071,16 @@ def create_app() -> FastAPI:
                         _build_resource_reference_map, identifiers
                     )
 
+            favorite_label, flagged_label = await asyncio.gather(
+                favorite_task, flagged_task
+            )
+
             resource_context = _video_resource_content(
-                video, listed_video, reference_map
+                video,
+                listed_video,
+                reference_map,
+                favorite=favorite_label == "favorite",
+                flagged=flagged_label == "flagged",
             )
             template_name = "configure/video_resource.html"
         else:  # pragma: no cover - defensive
