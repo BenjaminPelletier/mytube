@@ -193,6 +193,76 @@ h1 {
   white-space: pre-line;
 }
 
+.videos-filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.videos-filter-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.videos-filter-section {
+  border: 1px solid #d0d7de;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: #ffffff;
+}
+
+.videos-filter-section legend {
+  font-weight: 700;
+  color: #24292f;
+}
+
+.videos-filter-checkboxes {
+  display: grid;
+  gap: 0.35rem 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  margin: 0.25rem 0 0.5rem;
+}
+
+.videos-filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.videos-filter-channels summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #0969da;
+}
+
+.videos-filter-channel-grid {
+  margin-top: 0.5rem;
+}
+
+.videos-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.videos-filter-button {
+  padding: 0.55rem 1.2rem;
+  border-radius: 0.55rem;
+  border: 1px solid #1f6feb;
+  background: #1f6feb;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.videos-filter-button:hover,
+.videos-filter-button:focus-visible {
+  background: #1158c7;
+  border-color: #1158c7;
+}
+
 .settings-section p {
   margin-top: 0.5rem;
 }
