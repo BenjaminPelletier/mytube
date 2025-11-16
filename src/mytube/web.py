@@ -28,6 +28,7 @@ from .db import (
     fetch_channel,
     fetch_channel_sections,
     fetch_history,
+    fetch_history_event,
     fetch_listed_video,
     fetch_listed_videos,
     fetch_playlist,
@@ -100,6 +101,12 @@ RESOURCE_TYPE_ICONS = {
     "channel": "👤",
     "playlist": "≡",
     "video": "📹",
+}
+
+HISTORY_VIDEO_EVENT_TYPES = {
+    "video.play",
+    "video.favorite.toggle",
+    "video.flag.toggle",
 }
 
 CONFIG_ROUTE_NAMES = {
@@ -184,6 +191,107 @@ def _resource_vote(label: str | None) -> str:
     if label == "blacklisted":
         return "👎"
     return ""
+
+
+def _format_history_timestamp(value: Any) -> str:
+    display_value = value
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            dt = None
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            display_value = dt.astimezone(timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            )
+    return str(display_value)
+
+
+def _history_state(event_type: str, metadata: Mapping[str, Any]) -> dict[str, str] | None:
+    if event_type == "video.favorite.toggle":
+        is_favorite = bool(metadata.get("favorite"))
+        return {
+            "icon": "★" if is_favorite else "☆",
+            "label": "Favorite" if is_favorite else "Not favorite",
+            "class": "history-favorite-state",
+        }
+    if event_type == "video.flag.toggle":
+        is_flagged = bool(metadata.get("flagged"))
+        return {
+            "icon": "⚑" if is_flagged else "⚐",
+            "label": "Flagged" if is_flagged else "Not flagged",
+            "class": "history-flag-state" if is_flagged else "history-flag-state off",
+        }
+    return None
+
+
+def _history_video_info(
+    event_type: str, metadata: Mapping[str, Any], app: FastAPI, video_map: Mapping[str, Any]
+) -> dict[str, str] | None:
+    if event_type not in HISTORY_VIDEO_EVENT_TYPES:
+        return None
+
+    video_id = metadata.get("video_id")
+    if not isinstance(video_id, str) or not video_id:
+        return None
+
+    video_record = video_map.get(video_id)
+    title: str | None = None
+    if isinstance(video_record, Mapping):
+        raw_title = video_record.get("title")
+        if isinstance(raw_title, str):
+            title = raw_title
+    if not title:
+        raw_title = metadata.get("video_title")
+        if isinstance(raw_title, str) and raw_title.strip():
+            title = raw_title.strip()
+    if not title:
+        title = video_id
+
+    return {
+        "id": video_id,
+        "title": title,
+        "url": app.url_path_for("view_resource", section="videos", resource_id=video_id),
+    }
+
+
+def _history_event_context(
+    event: Mapping[str, Any],
+    app: FastAPI,
+    *,
+    video_map: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = event.get("metadata")
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    event_type = str(event.get("event_type") or "")
+    video_lookup = video_map or {}
+    video_info = _history_video_info(event_type, metadata, app, video_lookup)
+    state = _history_state(event_type, metadata)
+    metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
+    summary = ""
+    if video_info:
+        summary = video_info.get("title", "")
+    elif metadata:
+        summary = json.dumps(metadata, separators=(", ", ": "), sort_keys=True)
+    event_id = event.get("id")
+    detail_url = (
+        app.url_path_for("configure_history_event", event_id=str(event_id))
+        if event_id is not None
+        else None
+    )
+    return {
+        "id": event_id,
+        "event_type": event_type,
+        "created_at": _format_history_timestamp(event.get("created_at")),
+        "metadata_json": metadata_json,
+        "summary": summary,
+        "video": video_info,
+        "state": state,
+        "detail_url": detail_url,
+    }
 
 
 def _parse_video_filters(params: Mapping[str, Any]) -> VideoFilters:
@@ -1505,34 +1613,28 @@ def create_app() -> FastAPI:
     )
     async def configure_history(request: Request) -> HTMLResponse:
         events = await run_in_threadpool(fetch_history, 20)
-        formatted_events: list[dict[str, Any]] = []
+        video_ids: set[str] = set()
         for event in events:
-            created_at = event.get("created_at")
-            created_at_display = created_at
-            if isinstance(created_at, str):
-                try:
-                    dt = datetime.fromisoformat(created_at)
-                except ValueError:
-                    dt = None
-                if dt is not None:
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    created_at_display = dt.astimezone(timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M:%S %Z"
-                    )
-
             metadata = event.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-            metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
-            formatted_events.append(
-                {
-                    "id": event.get("id"),
-                    "event_type": event.get("event_type"),
-                    "created_at": created_at_display,
-                    "metadata_json": metadata_json,
-                }
-            )
+            if not isinstance(metadata, Mapping):
+                continue
+            event_type = event.get("event_type")
+            video_id = metadata.get("video_id")
+            if (
+                isinstance(video_id, str)
+                and video_id
+                and isinstance(event_type, str)
+                and event_type in HISTORY_VIDEO_EVENT_TYPES
+            ):
+                video_ids.add(video_id)
+
+        video_map: dict[str, Any] = {}
+        for video_id in video_ids:
+            video_map[video_id] = await run_in_threadpool(fetch_video, video_id)
+
+        formatted_events = [
+            _history_event_context(event, app, video_map=video_map) for event in events
+        ]
 
         return _render_config_page(
             request,
@@ -1541,6 +1643,35 @@ def create_app() -> FastAPI:
             active_section="history",
             template_name="configure/history.html",
             context={"events": formatted_events},
+            show_resource_form=False,
+        )
+
+    @app.get(
+        "/configure/history/{event_id}",
+        response_class=HTMLResponse,
+        name="configure_history_event",
+    )
+    async def configure_history_event(request: Request, event_id: int) -> HTMLResponse:
+        event = await run_in_threadpool(fetch_history_event, event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="History event not found")
+
+        video_map: dict[str, Any] = {}
+        metadata = event.get("metadata")
+        if isinstance(metadata, Mapping):
+            video_id = metadata.get("video_id")
+            if isinstance(video_id, str) and video_id:
+                video_map[video_id] = await run_in_threadpool(fetch_video, video_id)
+
+        formatted_event = _history_event_context(event, app, video_map=video_map)
+
+        return _render_config_page(
+            request,
+            app,
+            heading="History Event",
+            active_section="history",
+            template_name="configure/history_event.html",
+            context={"event": formatted_event},
             show_resource_form=False,
         )
 
