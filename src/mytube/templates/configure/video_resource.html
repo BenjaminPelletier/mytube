@@ -5,7 +5,12 @@
 <section>
   <h2 class="resource-title">
     <span class="resource-title-text">
-      {{ video.title }}{% if video.vote %} {{ video.vote }}{% if video.flagged_disqualifier %}<span class="resource-flag" title="Flagged">⚑</span>{% endif %}{% endif %}
+      {{ video.title }}{% if video.vote %}
+      <span class="thumb-icon">
+        <span class="thumb-emoji {% if video.vote == '👍' %}thumb-up{% else %}thumb-down{% endif %}">
+          {{ video.vote }}
+        </span>
+      </span>{% if video.flagged_disqualifier %}<span class="resource-flag" title="Flagged">⚑</span>{% endif %}{% endif %}
     </span>
     {% if video.info_url %}
     <a
@@ -19,7 +24,9 @@
   <p><small>ID: {{ video.id }}</small></p>
   {% for group in video.listed_groups %}
   <p class="resource-vote-line">
-    {{ group.icon }}
+    <span class="thumb-icon">
+      <span class="thumb-emoji {% if group.icon == '👍' %}thumb-up{% else %}thumb-down{% endif %}">{{ group.icon }}</span>
+    </span>
     {% for entry in group.entries %}
       <a href="{{ entry.url }}">{{ entry.title }}</a>{% if not loop.last %}, {% endif %}
     {% endfor %}
