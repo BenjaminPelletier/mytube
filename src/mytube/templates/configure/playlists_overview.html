@@ -14,7 +14,10 @@
       {{ playlist.channel.title }}
       {% endif %}
       ]
-      <a href="{{ playlist.url }}">{{ playlist.title }}</a>{% if playlist.vote %} {{ playlist.vote }}{% endif %}
+      <a href="{{ playlist.url }}">{{ playlist.title }}</a>{% if playlist.vote %}
+      <span class="thumb-icon {% if playlist.vote == '👍' %}thumb-up{% else %}thumb-down{% endif %}">
+        {{ playlist.vote }}
+      </span>{% endif %}
     </li>
     {% endfor %}
   </ol>

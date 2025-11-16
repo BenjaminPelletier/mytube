@@ -16,7 +16,7 @@
       <a href="{{ video.url }}">{{ video.title }}</a>
       {% for group in video.listed_groups %}
       <p class="resource-vote-line">
-        {{ group.icon }}
+        <span class="thumb-icon {% if group.icon == '👍' %}thumb-up{% else %}thumb-down{% endif %}">{{ group.icon }}</span>
         {% for entry in group.entries %}
           <a href="{{ entry.url }}">{{ entry.title }}</a>{% if not loop.last %}, {% endif %}
         {% endfor %}

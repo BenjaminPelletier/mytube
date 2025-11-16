@@ -87,11 +87,33 @@ def test_listed_videos_content_uses_reference_links():
         }
     ]
 
-    html = web._listed_videos_content("whitelist", videos, "/regen")
+    context = web._listed_videos_content("whitelist", videos, "/regen")
 
-    assert "<p>👍" in html
+    class DummyRequest:
+        def url_for(self, name: str, **params: str) -> str:  # pragma: no cover - trivial
+            path = params.get("path")
+            if name == "static" and path:
+                return f"/static/{path}"
+            if params:
+                return "/" + "/".join([name, *params.values()])
+            return f"/{name}"
+
+    template = web.templates.env.get_template("configure/listed_videos.html")
+    html = template.render(
+        {
+            **context,
+            "request": DummyRequest(),
+            "heading": "",
+            "navigation": [],
+            "form_action": "",
+            "resource_value": "",
+            "show_resource_form": False,
+        }
+    )
+
+    assert '<span class="thumb-icon thumb-up">👍</span>' in html
     assert "/configure/channels/UC123" in html
-    assert "<p>👎" in html
+    assert '<span class="thumb-icon thumb-down">👎</span>' in html
     assert "/configure/playlists/PL456" in html
 
 

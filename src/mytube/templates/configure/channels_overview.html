@@ -7,7 +7,10 @@
   <ol>
     {% for channel in channels %}
     <li>
-      <a href="{{ channel.url }}">{{ channel.title }}</a>{% if channel.vote %} {{ channel.vote }}{% endif %}
+      <a href="{{ channel.url }}">{{ channel.title }}</a>{% if channel.vote %}
+      <span class="thumb-icon {% if channel.vote == '👍' %}thumb-up{% else %}thumb-down{% endif %}">
+        {{ channel.vote }}
+      </span>{% endif %}
     </li>
     {% endfor %}
   </ol>

@@ -2,6 +2,19 @@
   color-scheme: light;
 }
 
+.thumb-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.thumb-icon.thumb-up {
+  color: #1a7f37;
+}
+
+.thumb-icon.thumb-down {
+  color: #b11226;
+}
+
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 2rem auto;

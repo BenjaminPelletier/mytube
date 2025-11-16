@@ -5,7 +5,10 @@
 <section>
   <h2 class="resource-title">
     <span class="resource-title-text">
-      {{ channel.title }}{% if channel.vote %} {{ channel.vote }}{% endif %}
+      {{ channel.title }}{% if channel.vote %}
+      <span class="thumb-icon {% if channel.vote == '👍' %}thumb-up{% else %}thumb-down{% endif %}">
+        {{ channel.vote }}
+      </span>{% endif %}
     </span>
     {% if channel.info_url %}
     <a

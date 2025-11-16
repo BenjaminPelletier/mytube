@@ -17,8 +17,24 @@
       <form class="resource-form" method="post" action="{{ form_action }}">
         <label for="resource-id">Resource ID</label>
         <input id="resource-id" name="resource_id" type="text" value="{{ resource_value }}" placeholder="Enter a YouTube ID" required>
-        <button type="submit" name="list" value="white" title="Add to whitelist">👍</button>
-        <button type="submit" name="list" value="black" title="Add to blacklist">👎</button>
+        <button
+          type="submit"
+          name="list"
+          value="white"
+          title="Add to whitelist"
+          class="thumb-icon thumb-up"
+        >
+          👍
+        </button>
+        <button
+          type="submit"
+          name="list"
+          value="black"
+          title="Add to blacklist"
+          class="thumb-icon thumb-down"
+        >
+          👎
+        </button>
       </form>
       {% endif %}
     </header>
