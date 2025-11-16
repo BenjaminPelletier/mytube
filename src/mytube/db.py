@@ -939,6 +939,69 @@ def fetch_listed_videos(list_type: str) -> list[dict[str, Any]]:
     return results
 
 
+def fetch_labeled_resources(label: str) -> list[dict[str, Any]]:
+    """Return channels, playlists, and videos with the specified label."""
+
+    if label not in {"whitelisted", "blacklisted"}:
+        raise ValueError("label must be either 'whitelisted' or 'blacklisted'")
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        resources: list[dict[str, Any]] = []
+
+        def _append_rows(statement, resource_type: str) -> None:
+            for resource_id, title in session.exec(statement):
+                if not isinstance(resource_id, str) or not resource_id:
+                    continue
+                resources.append(
+                    {
+                        "resource_type": resource_type,
+                        "resource_id": resource_id,
+                        "title": title,
+                    }
+                )
+
+        channel_stmt = (
+            select(ResourceLabel.resource_id, Channel.title)
+            .select_from(ResourceLabel)
+            .join(Channel, Channel.id == ResourceLabel.resource_id, isouter=True)
+            .where(ResourceLabel.resource_type == "channel")
+            .where(ResourceLabel.label == label)
+            .order_by(Channel.title.is_(None), Channel.title, ResourceLabel.resource_id)
+        )
+        _append_rows(channel_stmt, "channel")
+
+        playlist_stmt = (
+            select(ResourceLabel.resource_id, Playlist.title)
+            .select_from(ResourceLabel)
+            .join(Playlist, Playlist.id == ResourceLabel.resource_id, isouter=True)
+            .where(ResourceLabel.resource_type == "playlist")
+            .where(ResourceLabel.label == label)
+            .order_by(Playlist.title.is_(None), Playlist.title, ResourceLabel.resource_id)
+        )
+        _append_rows(playlist_stmt, "playlist")
+
+        video_stmt = (
+            select(ResourceLabel.resource_id, Video.title)
+            .select_from(ResourceLabel)
+            .join(Video, Video.id == ResourceLabel.resource_id, isouter=True)
+            .where(ResourceLabel.resource_type == "video")
+            .where(ResourceLabel.label == label)
+            .order_by(Video.title.is_(None), Video.title, ResourceLabel.resource_id)
+        )
+        _append_rows(video_stmt, "video")
+
+    resources.sort(
+        key=lambda item: (
+            item.get("title") is None,
+            (item.get("title") or "").lower(),
+            item.get("resource_id") or "",
+        )
+    )
+
+    return resources
+
+
 def fetch_listed_video(video_id: str) -> dict[str, Any] | None:
     """Return the listed video entry for a specific video."""
 

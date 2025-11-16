@@ -1,0 +1,41 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section>
+  <h2>{{ heading_label }}</h2>
+  <form class="regenerate-form" method="post" action="{{ regenerate_url }}">
+    <button type="submit">Regenerate</button>
+  </form>
+  {% if resources %}
+  <div class="videos-table-wrapper">
+    <table class="videos-table">
+      <colgroup>
+        <col class="videos-table-play-column" />
+        <col class="videos-table-title-column" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col" class="videos-table-play">Type</th>
+          <th scope="col">Resource</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for resource in resources %}
+        <tr>
+          <td class="videos-table-play" aria-label="{{ resource.type_label }}">
+            <span class="listed-resource-icon" title="{{ resource.type_label }}">{{ resource.icon }}</span>
+          </td>
+          <td class="videos-table-title">
+            <a href="{{ resource.url }}">{{ resource.title }}</a>
+            <div class="listed-resource-id">{{ resource.resource_id }}</div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No resources have been recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

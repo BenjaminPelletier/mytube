@@ -391,6 +391,22 @@ h1 {
   margin-left: 0.35rem;
 }
 
+.listed-resource-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.listed-resource-id {
+  color: #57606a;
+  font-size: 0.85rem;
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;
