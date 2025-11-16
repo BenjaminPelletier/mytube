@@ -1,0 +1,29 @@
+{% extends "configure/base.html" %}
+
+{% block content %}
+<section class="history-event-detail">
+  <h2>History Event {{ event.id }}</h2>
+  <dl class="resource-meta">
+    <dt>Event type</dt>
+    <dd>{{ event.event_type }}</dd>
+    <dt>When</dt>
+    <dd>{{ event.created_at }}</dd>
+    {% if event.video %}
+    <dt>Video</dt>
+    <dd><a href="{{ event.video.url }}">{{ event.video.title }}</a></dd>
+    {% endif %}
+    {% if event.state %}
+    <dt>Status</dt>
+    <dd>
+      <span class="history-state-icon {{ event.state.class if event.state.class else '' }}" aria-label="{{ event.state.label }}" title="{{ event.state.label }}">{{ event.state.icon }}</span>
+      {{ event.state.label }}
+    </dd>
+    {% endif %}
+  </dl>
+  <div class="history-metadata">
+    <h3>Metadata</h3>
+    <pre><code>{{ event.metadata_json }}</code></pre>
+  </div>
+  <p class="history-back-link"><a href="{{ url_for('configure_history') }}">Back to history</a></p>
+</section>
+{% endblock %}

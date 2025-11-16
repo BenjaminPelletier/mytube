@@ -1360,6 +1360,29 @@ def fetch_history(limit: int = 20) -> list[dict[str, Any]]:
     return events
 
 
+def fetch_history_event(event_id: int) -> dict[str, Any] | None:
+    """Return a single history event by identifier."""
+
+    engine = _get_engine()
+    with Session(engine) as session:
+        record = session.get(HistoryEvent, event_id)
+
+    if record is None:
+        return None
+
+    try:
+        metadata = json.loads(record.metadata_json or "{}")
+    except json.JSONDecodeError:
+        metadata = {}
+
+    return {
+        "id": record.id,
+        "event_type": record.event_type,
+        "created_at": record.created_at,
+        "metadata": metadata,
+    }
+
+
 __all__ = [
     "initialize_database",
     "save_playlist_items",
@@ -1386,5 +1409,6 @@ __all__ = [
     "repopulate_listed_videos",
     "log_history_event",
     "fetch_history",
+    "fetch_history_event",
 ]
 

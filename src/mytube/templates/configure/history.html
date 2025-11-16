@@ -3,24 +3,58 @@
 {% block content %}
 <section class="history">
   {% if events %}
-  <table class="history-table">
-    <thead>
-      <tr>
-        <th scope="col">When</th>
-        <th scope="col">Event</th>
-        <th scope="col">Details</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for event in events %}
-      <tr>
-        <td data-label="When">{{ event.created_at }}</td>
-        <td data-label="Event">{{ event.event_type }}</td>
-        <td data-label="Details"><pre>{{ event.metadata_json }}</pre></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="videos-table-wrapper">
+    <table class="videos-table history-table">
+      <colgroup>
+        <col class="history-event-type-column" />
+        <col class="history-event-summary-column" />
+        <col class="history-event-state-column" />
+        <col class="history-event-time-column" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col">Event</th>
+          <th scope="col">Details</th>
+          <th scope="col">State</th>
+          <th scope="col">When</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        {% set state_class = "history-event-state" %}
+        {% if event.state and event.state.class %}
+        {% set state_class = state_class ~ " " ~ event.state.class %}
+        {% endif %}
+        {% set cells = [
+          {"content": event.event_type, "url": event.detail_url, "class": "history-event-type"},
+          {"content": event.summary, "url": event.video.url if event.video else None, "class": "history-event-summary"},
+          {"content": event.state.icon if event.state else "", "title": event.state.label if event.state else "", "class": state_class},
+          {"content": event.created_at, "class": "history-event-time"},
+        ] %}
+        {% set last_non_empty = -1 %}
+        {% for cell in cells %}
+          {% if cell.content %}
+            {% set last_non_empty = loop.index0 %}
+          {% endif %}
+        {% endfor %}
+        <tr>
+          {% for cell in cells %}
+            {% if loop.index0 <= last_non_empty %}
+              {% set colspan = (cells|length - loop.index0) if loop.index0 == last_non_empty else 1 %}
+              <td class="{{ cell.class }}"{% if colspan > 1 %} colspan="{{ colspan }}"{% endif %}{% if cell.title %} title="{{ cell.title }}"{% endif %}>
+                {% if cell.url and cell.content %}
+                  <a href="{{ cell.url }}">{{ cell.content }}</a>
+                {% elif cell.content %}
+                  {{ cell.content }}
+                {% endif %}
+              </td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
   <p>No history events recorded yet.</p>
   {% endif %}
