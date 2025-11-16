@@ -23,6 +23,7 @@ from .db import (
     fetch_all_channels,
     fetch_all_playlists,
     fetch_all_videos,
+    VideoFilters,
     fetch_channel,
     fetch_channel_sections,
     fetch_history,
@@ -78,6 +79,14 @@ CONFIG_NAVIGATION = (
 )
 RESOURCE_LABELS = {slug: label for slug, label in RESOURCE_NAVIGATION}
 LIST_PAGE_LABELS = {slug: label for slug, label in LIST_NAVIGATION}
+VIDEO_FILTER_OPTIONS = (
+    ("whitelisted", "Whitelisted"),
+    ("blacklisted", "Blacklisted"),
+    ("disqualified", "Disqualified"),
+    ("favorites", "Favorites"),
+    ("flagged", "Flagged"),
+    ("has_details", "Has details"),
+)
 LIST_PAGE_FIELDS = {"whitelist": "whitelisted_by", "blacklist": "blacklisted_by"}
 LISTED_VIDEO_FIELD_PREFIXES = {
     "whitelisted_by": "👍",
@@ -169,6 +178,33 @@ def _resource_vote(label: str | None) -> str:
     if label == "blacklisted":
         return "👎"
     return ""
+
+
+def _parse_video_filters(params: Mapping[str, Any]) -> VideoFilters:
+    filter_keys = {option[0] for option in VIDEO_FILTER_OPTIONS}
+
+    def _get_list(name: str) -> list[str]:
+        getter = getattr(params, "getlist", None)
+        if callable(getter):
+            return getter(name)
+        value = params.get(name)
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value]
+        return [str(value)]
+
+    include = {value for value in _get_list("include") if value in filter_keys}
+    exclude = {value for value in _get_list("exclude") if value in filter_keys}
+    include_channels = {value for value in _get_list("include_channel") if value}
+    exclude_channels = {value for value in _get_list("exclude_channel") if value}
+
+    return VideoFilters(
+        include=include,
+        exclude=exclude,
+        include_channels=include_channels,
+        exclude_channels=exclude_channels,
+    )
 
 
 def _channels_overview_content(channels: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -1335,16 +1371,34 @@ def create_app() -> FastAPI:
         name="configure_videos",
     )
     async def configure_videos(request: Request) -> HTMLResponse:
-        videos = await run_in_threadpool(fetch_all_videos)
+        filters = _parse_video_filters(request.query_params)
+        channels = await run_in_threadpool(fetch_all_channels)
+        videos = await run_in_threadpool(fetch_all_videos, filters)
         video_items = _videos_overview_content(videos)
         heading = f"Manage {RESOURCE_LABELS['videos']}"
+        filter_channels = sorted(
+            (
+                {
+                    "id": channel.get("id"),
+                    "title": channel.get("title") or channel.get("id"),
+                }
+                for channel in channels
+                if channel.get("id")
+            ),
+            key=lambda item: (item.get("title") or "").casefold(),
+        )
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="videos",
             template_name="configure/videos_overview.html",
-            context={"videos": video_items},
+            context={
+                "videos": video_items,
+                "video_filters": filters,
+                "video_filter_options": VIDEO_FILTER_OPTIONS,
+                "filter_channels": filter_channels,
+            },
             form_action=app.url_path_for(CREATE_ROUTE_NAMES["videos"]),
         )
 

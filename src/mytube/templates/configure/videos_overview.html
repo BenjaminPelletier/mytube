@@ -3,6 +3,40 @@
 {% block content %}
 <section>
   <h2>Stored Videos</h2>
+  <form class="videos-filter-form" method="get">
+    <div class="videos-filter-sections">
+      {% for section_key, section_label, selected in (
+        ("include", "Include", video_filters.include),
+        ("exclude", "Exclude", video_filters.exclude),
+      ) %}
+      <fieldset class="videos-filter-section">
+        <legend>{{ section_label }}</legend>
+        <div class="videos-filter-checkboxes">
+          {% for key, label in video_filter_options %}
+          <label class="videos-filter-checkbox">
+            <input type="checkbox" name="{{ section_key }}" value="{{ key }}"{% if key in selected %} checked{% endif %}>
+            {{ label }}
+          </label>
+          {% endfor %}
+        </div>
+        <details class="videos-filter-channels"{% if section_key == 'include' and video_filters.include_channels %} open{% elif section_key == 'exclude' and video_filters.exclude_channels %} open{% endif %}>
+          <summary>Channels</summary>
+          <div class="videos-filter-checkboxes videos-filter-channel-grid">
+            {% for channel in filter_channels %}
+            <label class="videos-filter-checkbox">
+              <input type="checkbox" name="{{ section_key }}_channel" value="{{ channel.id }}"{% if (section_key == 'include' and channel.id in video_filters.include_channels) or (section_key == 'exclude' and channel.id in video_filters.exclude_channels) %} checked{% endif %}>
+              {{ channel.title }}
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+      </fieldset>
+      {% endfor %}
+    </div>
+    <div class="videos-filter-actions">
+      <button type="submit" class="videos-filter-button">Filter</button>
+    </div>
+  </form>
   {% if videos %}
   <div class="videos-table-wrapper">
     <table class="videos-table">

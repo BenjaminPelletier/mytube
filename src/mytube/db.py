@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -128,6 +129,20 @@ class ListedVideo(SQLModel, table=True):
         default=None,
         sa_column=Column("disqualifying_attributes", Text, nullable=True),
     )
+
+
+@dataclass
+class VideoFilters:
+    """Filters used to narrow the video overview list."""
+
+    include: set[str] = field(default_factory=set)
+    exclude: set[str] = field(default_factory=set)
+    include_channels: set[str] = field(default_factory=set)
+    exclude_channels: set[str] = field(default_factory=set)
+
+    @property
+    def has_include_criteria(self) -> bool:
+        return bool(self.include or self.include_channels)
 
 
 class Setting(SQLModel, table=True):
@@ -1099,46 +1114,138 @@ def repopulate_listed_videos() -> None:
         session.commit()
 
 
-def fetch_all_videos() -> list[dict]:
-    """Return stored video records including their labels."""
+def fetch_all_videos(filters: VideoFilters | None = None) -> list[dict]:
+    """Return stored video records including their labels and filter support."""
+
+    filters = filters or VideoFilters()
 
     engine = _get_engine()
     with Session(engine) as session:
-        list_label = (
-            select(ResourceLabel.label)
-            .where(ResourceLabel.resource_type == "video")
-            .where(ResourceLabel.resource_id == Video.id)
-            .where(ResourceLabel.label.in_({"whitelisted", "blacklisted"}))
-            .limit(1)
-            .scalar_subquery()
+        label_stmt = select(ResourceLabel.resource_id, ResourceLabel.label).where(
+            ResourceLabel.resource_type == "video",
+            ResourceLabel.label.in_({"favorite", "flagged"}),
         )
+        label_map: dict[str, set[str]] = {}
+        for resource_id, label in session.exec(label_stmt):
+            if not resource_id or not label:
+                continue
+            label_map.setdefault(resource_id, set()).add(label)
+
+        uploads_lookup = select(Channel.id, Channel.uploads_playlist).where(
+            Channel.uploads_playlist.is_not(None)
+        )
+        playlist_to_channels: dict[str, set[str]] = {}
+        playlist_ids: list[str] = []
+        for channel_id, playlist_id in session.exec(uploads_lookup):
+            if not isinstance(channel_id, str) or not channel_id:
+                continue
+            if not isinstance(playlist_id, str) or not playlist_id:
+                continue
+            playlist_to_channels.setdefault(playlist_id, set()).add(channel_id)
+            playlist_ids.append(playlist_id)
+
+        video_channel_map: dict[str, set[str]] = {}
+        if playlist_ids:
+            playlist_ids = sorted(set(playlist_ids))
+            items_stmt = select(
+                PlaylistItem.playlist_id, PlaylistItem.raw_json
+            ).where(PlaylistItem.playlist_id.in_(playlist_ids))
+            for playlist_id, raw_json in session.exec(items_stmt):
+                video_id = _extract_video_id_from_playlist_item(raw_json)
+                if not video_id:
+                    continue
+                for channel_id in playlist_to_channels.get(playlist_id, set()):
+                    video_channel_map.setdefault(video_id, set()).add(channel_id)
+
         statement = (
             select(
                 Video.id,
                 Video.title,
                 Video.channel_title,
                 Video.retrieved_at,
-                list_label,
                 Video.raw_json,
+                ListedVideo.whitelisted_by,
+                ListedVideo.blacklisted_by,
                 ListedVideo.disqualifying_attributes,
             )
             .select_from(Video)
             .join(ListedVideo, ListedVideo.video_id == Video.id, isouter=True)
-            .order_by(list_label.is_(None), Video.retrieved_at.desc(), Video.id)
+            .order_by(
+                ListedVideo.whitelisted_by.is_(None),
+                Video.retrieved_at.desc(),
+                Video.id,
+            )
         )
         rows = session.exec(statement).all()
-    return [
-        {
-            "id": row[0],
-            "title": row[1],
-            "channel_title": row[2],
-            "retrieved_at": row[3],
-            "label": row[4],
-            "has_raw": bool(row[5]),
-            "disqualifying_attributes": _load_identifier_list(row[6]),
+
+    def _video_matches_filters(
+        status_flags: dict[str, bool],
+        channel_ids: set[str],
+        video_filters: VideoFilters,
+    ) -> bool:
+        if video_filters.has_include_criteria:
+            for key in video_filters.include:
+                if not status_flags.get(key, False):
+                    return False
+            if video_filters.include_channels and not (
+                channel_ids & video_filters.include_channels
+            ):
+                return False
+
+        if any(status_flags.get(key, False) for key in video_filters.exclude):
+            return False
+        if video_filters.exclude_channels and channel_ids & video_filters.exclude_channels:
+            return False
+        return True
+
+    results: list[dict] = []
+    for row in rows:
+        video_id = row[0]
+        if not video_id:
+            continue
+
+        whitelisted_by = _load_identifier_list(row[5])
+        blacklisted_by = _load_identifier_list(row[6])
+        disqualifying_attributes = _load_identifier_list(row[7])
+        labels = label_map.get(video_id, set())
+        channel_ids = video_channel_map.get(video_id, set())
+
+        status_flags = {
+            "whitelisted": bool(whitelisted_by),
+            "blacklisted": bool(blacklisted_by),
+            "disqualified": bool(disqualifying_attributes),
+            "favorites": "favorite" in labels,
+            "flagged": "flagged" in labels,
+            "has_details": bool(row[4]),
         }
-        for row in rows
-    ]
+
+        if not _video_matches_filters(status_flags, channel_ids, filters):
+            continue
+
+        label_value = None
+        if status_flags["whitelisted"]:
+            label_value = "whitelisted"
+        elif status_flags["blacklisted"]:
+            label_value = "blacklisted"
+
+        results.append(
+            {
+                "id": video_id,
+                "title": row[1],
+                "channel_title": row[2],
+                "retrieved_at": row[3],
+                "label": label_value,
+                "has_raw": status_flags["has_details"],
+                "disqualifying_attributes": disqualifying_attributes,
+                "channel_ids": sorted(channel_ids),
+                "flags": {
+                    "favorite": status_flags["favorites"],
+                    "flagged": status_flags["flagged"],
+                },
+            }
+        )
+
+    return results
 
 
 def log_history_event(event_type: str, metadata: dict[str, Any] | None = None) -> None:
@@ -1205,6 +1312,7 @@ __all__ = [
     "fetch_all_playlists",
     "fetch_all_channels",
     "fetch_all_videos",
+    "VideoFilters",
     "set_resource_label",
     "clear_resource_label",
     "fetch_resource_label",

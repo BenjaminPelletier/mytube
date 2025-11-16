@@ -33,6 +33,7 @@ def test_videos_overview_content_includes_channel_title() -> None:
             "raw_url": "/configure/videos/video123/raw",
             "load_url": "/configure/videos/video123/load",
             "vote": "",
+            "flagged_disqualifier": False,
         }
     ]
 
@@ -60,5 +61,33 @@ def test_videos_overview_content_falls_back_to_unknown_channel() -> None:
             "raw_url": None,
             "load_url": "/configure/videos/video456/load",
             "vote": "👍",
+            "flagged_disqualifier": False,
         }
     ]
+
+
+def test_parse_video_filters_supports_include_and_exclude_channels() -> None:
+    params = {
+        "include": ["whitelisted", "has_details"],
+        "exclude": ["flagged"],
+        "include_channel": ["chan1", "chan3"],
+        "exclude_channel": ["chan2"],
+    }
+
+    filters = web._parse_video_filters(params)  # type: ignore[attr-defined]
+
+    assert filters.include == {"whitelisted", "has_details"}
+    assert filters.exclude == {"flagged"}
+    assert filters.include_channels == {"chan1", "chan3"}
+    assert filters.exclude_channels == {"chan2"}
+
+
+def test_parse_video_filters_ignores_unknown_values() -> None:
+    params = {"include": ["unknown"], "exclude": [""], "include_channel": [""]}
+
+    filters = web._parse_video_filters(params)  # type: ignore[attr-defined]
+
+    assert not filters.include
+    assert not filters.exclude
+    assert not filters.include_channels
+    assert not filters.exclude_channels
