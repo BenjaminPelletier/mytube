@@ -111,9 +111,9 @@ def test_listed_videos_content_uses_reference_links():
         }
     )
 
-    assert '<span class="thumb-icon thumb-up">👍</span>' in html
+    assert 'thumb-emoji thumb-up">👍' in html
     assert "/configure/channels/UC123" in html
-    assert '<span class="thumb-icon thumb-down">👎</span>' in html
+    assert 'thumb-emoji thumb-down">👎' in html
     assert "/configure/playlists/PL456" in html
 
 

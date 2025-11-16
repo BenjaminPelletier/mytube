@@ -7,12 +7,19 @@
   align-items: center;
 }
 
-.thumb-icon.thumb-up {
-  color: #1a7f37;
+.thumb-emoji {
+  display: inline-block;
+  line-height: 1;
 }
 
-.thumb-icon.thumb-down {
+.thumb-emoji.thumb-up {
+  color: #1a7f37;
+  filter: grayscale(1) brightness(0.9) sepia(1) hue-rotate(85deg) saturate(6);
+}
+
+.thumb-emoji.thumb-down {
   color: #b11226;
+  filter: grayscale(1) brightness(0.9) sepia(1) hue-rotate(-25deg) saturate(6);
 }
 
 body {

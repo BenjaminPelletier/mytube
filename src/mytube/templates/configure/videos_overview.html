@@ -65,7 +65,9 @@
             <a href="{{ video.url }}">{{ video.video_title }}</a>
             {% if video.vote %}
             <span class="videos-table-vote">
-              <span class="thumb-icon {% if video.vote == '👍' %}thumb-up{% else %}thumb-down{% endif %}">{{ video.vote }}</span>{% if video.flagged_disqualifier %}<span class="videos-table-flag" title="Flagged"> ⚑</span>{% endif %}
+              <span class="thumb-icon">
+                <span class="thumb-emoji {% if video.vote == '👍' %}thumb-up{% else %}thumb-down{% endif %}">{{ video.vote }}</span>
+              </span>{% if video.flagged_disqualifier %}<span class="videos-table-flag" title="Flagged"> ⚑</span>{% endif %}
             </span>
             {% endif %}
           </td>
