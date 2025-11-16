@@ -399,14 +399,6 @@ h1 {
   height: 1.75rem;
 }
 
-.listed-resource-id {
-  color: #57606a;
-  font-size: 0.85rem;
-  margin-top: 0.15rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .settings-form {
   display: flex;
   flex-direction: column;
