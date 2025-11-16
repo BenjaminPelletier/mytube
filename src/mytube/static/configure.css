@@ -14,12 +14,12 @@
 
 .thumb-emoji.thumb-up {
   color: #1a7f37;
-  filter: grayscale(1) brightness(0.9) sepia(1) hue-rotate(85deg) saturate(6);
+  filter: grayscale(1) brightness(0.5) sepia(1) hue-rotate(85deg) saturate(6) contrast(1.05);
 }
 
 .thumb-emoji.thumb-down {
   color: #b11226;
-  filter: grayscale(1) brightness(0.95) sepia(1) hue-rotate(-55deg) saturate(8) contrast(1.05);
+  filter: grayscale(1) brightness(0.95) sepia(1) hue-rotate(-55deg) saturate(12) contrast(1.05);
 }
 
 body {
