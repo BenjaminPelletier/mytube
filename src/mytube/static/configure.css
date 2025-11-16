@@ -19,7 +19,7 @@
 
 .thumb-emoji.thumb-down {
   color: #b11226;
-  filter: grayscale(1) brightness(0.9) sepia(1) hue-rotate(-25deg) saturate(6);
+  filter: grayscale(1) brightness(0.95) sepia(1) hue-rotate(-55deg) saturate(8) contrast(1.05);
 }
 
 body {
