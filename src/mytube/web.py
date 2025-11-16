@@ -23,6 +23,7 @@ from .db import (
     fetch_all_channels,
     fetch_all_playlists,
     fetch_all_videos,
+    fetch_labeled_resources,
     VideoFilters,
     fetch_channel,
     fetch_channel_sections,
@@ -95,6 +96,11 @@ LISTED_VIDEO_FIELD_PREFIXES = {
 
 LIST_LABELS = {"white": "Whitelist", "black": "Blacklist"}
 LIST_TO_RESOURCE_LABEL = {"white": "whitelisted", "black": "blacklisted"}
+RESOURCE_TYPE_ICONS = {
+    "channel": "👤",
+    "playlist": "≡",
+    "video": "📹",
+}
 
 CONFIG_ROUTE_NAMES = {
     "channels": "configure_channels",
@@ -295,12 +301,7 @@ def _listed_videos_content(
 
     approved_total: int | None = None
     if list_slug == "whitelist":
-        approved_total = sum(
-            1
-            for video in videos
-            if not video.get("blacklisted_by")
-            and not video.get("disqualifying_attributes")
-        )
+        approved_total = _count_approved_videos(videos)
 
     items: list[dict[str, Any]] = []
     for video in videos:
@@ -321,6 +322,42 @@ def _listed_videos_content(
         "heading_label": heading_label,
         "regenerate_url": regenerate_url,
         "videos": items,
+        "approved_total": approved_total,
+    }
+
+
+def _listed_resources_content(
+    list_slug: str,
+    resources: list[dict[str, Any]],
+    regenerate_url: str,
+    approved_total: int | None = None,
+) -> dict[str, Any]:
+    heading_label = f"{LIST_PAGE_LABELS.get(list_slug, list_slug.title())} Resources"
+
+    items: list[dict[str, str]] = []
+    for resource in resources:
+        resource_type = resource.get("resource_type") or ""
+        resource_id = resource.get("resource_id") or ""
+        if not resource_type or not resource_id:
+            continue
+        icon = RESOURCE_TYPE_ICONS.get(resource_type, "❓")
+        title = resource.get("title") or resource_id
+        encoded_resource_id = quote(resource_id, safe="")
+        resource_url = f"/configure/{resource_type}s/{encoded_resource_id}"
+        items.append(
+            {
+                "title": title,
+                "resource_id": resource_id,
+                "icon": icon,
+                "type_label": resource_type.title(),
+                "url": resource_url,
+            }
+        )
+
+    return {
+        "heading_label": heading_label,
+        "regenerate_url": regenerate_url,
+        "resources": items,
         "approved_total": approved_total,
     }
 
@@ -635,6 +672,15 @@ def _build_listed_groups(
         if entries:
             groups.append({"icon": icon, "entries": entries})
     return groups
+
+
+def _count_approved_videos(videos: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for video in videos
+        if not video.get("blacklisted_by")
+        and not video.get("disqualifying_attributes")
+    )
 
 
 def _video_resource_content(
@@ -1408,18 +1454,22 @@ def create_app() -> FastAPI:
         name="configure_whitelist",
     )
     async def configure_whitelist(request: Request) -> HTMLResponse:
+        resources = await run_in_threadpool(fetch_labeled_resources, "whitelisted")
         videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
+        approved_total = _count_approved_videos(videos)
         regenerate_url = app.url_path_for(
             "regenerate_listed_videos", list_slug="whitelist"
         )
-        list_context = _listed_videos_content("whitelist", videos, regenerate_url)
-        heading = f"{LIST_PAGE_LABELS['whitelist']} Videos"
+        list_context = _listed_resources_content(
+            "whitelist", resources, regenerate_url, approved_total
+        )
+        heading = f"{LIST_PAGE_LABELS['whitelist']} Resources"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="whitelist",
-            template_name="configure/listed_videos.html",
+            template_name="configure/listed_resources.html",
             context=list_context,
             show_resource_form=False,
         )
@@ -1430,18 +1480,20 @@ def create_app() -> FastAPI:
         name="configure_blacklist",
     )
     async def configure_blacklist(request: Request) -> HTMLResponse:
-        videos = await run_in_threadpool(fetch_listed_videos, "blacklist")
+        resources = await run_in_threadpool(fetch_labeled_resources, "blacklisted")
         regenerate_url = app.url_path_for(
             "regenerate_listed_videos", list_slug="blacklist"
         )
-        list_context = _listed_videos_content("blacklist", videos, regenerate_url)
-        heading = f"{LIST_PAGE_LABELS['blacklist']} Videos"
+        list_context = _listed_resources_content(
+            "blacklist", resources, regenerate_url
+        )
+        heading = f"{LIST_PAGE_LABELS['blacklist']} Resources"
         return _render_config_page(
             request,
             app,
             heading=heading,
             active_section="blacklist",
-            template_name="configure/listed_videos.html",
+            template_name="configure/listed_resources.html",
             context=list_context,
             show_resource_form=False,
         )
