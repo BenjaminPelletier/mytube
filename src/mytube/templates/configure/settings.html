@@ -65,9 +65,6 @@
     const pairButton = document.getElementById('youtube-pair-button');
     const errorDialog = document.getElementById('settings-error-dialog');
     const errorMessage = document.getElementById('settings-error-message');
-    const existingAuth = settings && typeof settings.youtube_app_auth === 'string'
-      ? settings.youtube_app_auth.trim()
-      : '';
 
     const setButtonState = (label, disabled) => {
       if (pairButton) {
@@ -91,13 +88,6 @@
         window.alert(fallback);
       }
     };
-
-    if (existingAuth) {
-      setButtonState('Paired!', true);
-      if (codeInput) {
-        codeInput.disabled = true;
-      }
-    }
 
     pairForm.addEventListener('submit', async (event) => {
       event.preventDefault();
