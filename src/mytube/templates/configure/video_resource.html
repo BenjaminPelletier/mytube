@@ -3,6 +3,8 @@
 {% block content %}
 {% if video %}
 <section>
+  {% set is_favorite = video.favorite %}
+  {% set is_flagged = video.flagged or video.flagged_disqualifier %}
   <h2 class="resource-title">
     <span class="resource-title-text">
       {{ video.title }}{% if video.vote %}
@@ -11,14 +13,6 @@
           {{ video.vote }}
         </span>
       </span>{% endif %}
-      <span class="resource-label-chips">
-        {% if video.favorite %}
-        <span class="resource-label-badge is-favorite" title="Favorite video">♥ Favorite</span>
-        {% endif %}
-        {% if video.flagged or video.flagged_disqualifier %}
-        <span class="resource-label-badge is-flagged" title="Flagged video">⚑ Flagged</span>
-        {% endif %}
-      </span>
     </span>
     {% if video.info_url %}
     <a
@@ -49,35 +43,29 @@
   <div
     class="resource-label-panel"
     data-video-id="{{ video.id }}"
-    data-favorite="{% if video.favorite %}true{% else %}false{% endif %}"
-    data-flagged="{% if video.flagged %}true{% else %}false{% endif %}"
+    data-favorite="{% if is_favorite %}true{% else %}false{% endif %}"
+    data-flagged="{% if is_flagged %}true{% else %}false{% endif %}"
   >
-    <div class="resource-labels" aria-live="polite">
-      <span class="resource-label-badge is-favorite{% if not video.favorite %} is-inactive{% endif %}" data-label="favorite">
-        <span aria-hidden="true">♥</span>
-        <span class="resource-label-text">{% if video.favorite %}Favorite{% else %}Not favorite{% endif %}</span>
-      </span>
-      <span class="resource-label-badge is-flagged{% if not video.flagged %} is-inactive{% endif %}" data-label="flagged">
-        <span aria-hidden="true">⚑</span>
-        <span class="resource-label-text">{% if video.flagged %}Flagged{% else %}Not flagged{% endif %}</span>
-      </span>
-    </div>
     <div class="resource-label-actions">
       <button
         type="button"
-        class="resource-label-button favorite-toggle"
-        aria-pressed="{% if video.favorite %}true{% else %}false{% endif %}"
-        aria-label="{% if video.favorite %}Remove from favorites{% else %}Add to favorites{% endif %}"
+        class="resource-label-toggle is-favorite{% if not is_favorite %} is-inactive{% endif %}"
+        data-label="favorite"
+        aria-pressed="{% if is_favorite %}true{% else %}false{% endif %}"
+        aria-label="{% if is_favorite %}Remove from favorites{% else %}Add to favorites{% endif %}"
       >
-        {% if video.favorite %}♥ Remove favorite{% else %}♡ Add to favorites{% endif %}
+        <span class="resource-label-icon" aria-hidden="true">{% if is_favorite %}♥{% else %}♡{% endif %}</span>
+        <span class="resource-label-text">{% if is_favorite %}Favorite{% else %}Not favorite{% endif %}</span>
       </button>
       <button
         type="button"
-        class="resource-label-button flag-toggle"
-        aria-pressed="{% if video.flagged %}true{% else %}false{% endif %}"
-        aria-label="{% if video.flagged %}Unflag video{% else %}Flag video{% endif %}"
+        class="resource-label-toggle is-flagged{% if not is_flagged %} is-inactive{% endif %}"
+        data-label="flagged"
+        aria-pressed="{% if is_flagged %}true{% else %}false{% endif %}"
+        aria-label="{% if is_flagged %}Unflag video{% else %}Flag video{% endif %}"
       >
-        {% if video.flagged %}⚑ Unflag video{% else %}⚑ Flag video{% endif %}
+        <span class="resource-label-icon" aria-hidden="true">⚑</span>
+        <span class="resource-label-text">{% if is_flagged %}Flagged{% else %}Not flagged{% endif %}</span>
       </button>
       <span class="resource-label-status" role="status" aria-live="polite"></span>
     </div>
@@ -91,8 +79,8 @@
     }
 
     const videoId = panel.dataset.videoId || "";
-    const favoriteButton = panel.querySelector(".favorite-toggle");
-    const flagButton = panel.querySelector(".flag-toggle");
+    const favoriteButton = panel.querySelector('[data-label="favorite"]');
+    const flagButton = panel.querySelector('[data-label="flagged"]');
     const statusEl = panel.querySelector(".resource-label-status");
     const favoriteUrlTemplate = "{{ url_for('toggle_favorite', video_id='__VIDEO_ID__') }}";
     const flagUrlTemplate = "{{ url_for('toggle_flag', video_id='__VIDEO_ID__') }}";
@@ -100,11 +88,6 @@
     if (!videoId) {
       return;
     }
-
-    const labelText = {
-      favorite: { active: "Favorite", inactive: "Not favorite" },
-      flagged: { active: "Flagged", inactive: "Not flagged" },
-    };
 
     const buildUrl = (template) =>
       template.replace("__VIDEO_ID__", encodeURIComponent(videoId));
@@ -115,28 +98,34 @@
       }
     };
 
-    const updateBadge = (type, isActive) => {
-      const badge = panel.querySelector(`[data-label="${type}"]`);
-      if (!(badge instanceof HTMLElement)) {
-        return;
-      }
-      badge.classList.toggle("is-inactive", !isActive);
-      const text = badge.querySelector(".resource-label-text");
-      if (text instanceof HTMLElement) {
-        const labels = labelText[type];
-        text.textContent = isActive ? labels.active : labels.inactive;
-      }
-    };
-
     const updateButton = (
       button,
       isActive,
-      { activeText, inactiveText, activeLabel, inactiveLabel }
+      {
+        activeText,
+        inactiveText,
+        activeLabel,
+        inactiveLabel,
+        activeIcon,
+        inactiveIcon,
+      }
     ) => {
       if (!(button instanceof HTMLButtonElement)) {
         return;
       }
-      button.textContent = isActive ? activeText : inactiveText;
+      const icon = button.querySelector(".resource-label-icon");
+      const text = button.querySelector(".resource-label-text");
+      const newText = isActive ? activeText : inactiveText;
+      const newIcon = isActive ? activeIcon : inactiveIcon;
+
+      if (icon instanceof HTMLElement) {
+        icon.textContent = newIcon;
+      }
+      if (text instanceof HTMLElement) {
+        text.textContent = newText;
+      }
+
+      button.classList.toggle("is-inactive", !isActive);
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
       button.setAttribute("aria-label", isActive ? activeLabel : inactiveLabel);
     };
@@ -202,12 +191,13 @@
 
         const isActive = Boolean(payload[responseKey]);
         panel.dataset[datasetKey] = isActive ? "true" : "false";
-        updateBadge(datasetKey, isActive);
         updateButton(button, isActive, {
           activeText,
           inactiveText,
           activeLabel,
           inactiveLabel,
+          activeIcon: config.activeIcon,
+          inactiveIcon: config.inactiveIcon,
         });
         setStatus(successMessage.replace("{state}", isActive ? "on" : "off"));
       } catch (error) {
@@ -227,10 +217,12 @@
           urlTemplate: favoriteUrlTemplate,
           datasetKey: "favorite",
           responseKey: "favorite",
-          activeText: "♥ Remove favorite",
-          inactiveText: "♡ Add to favorites",
+          activeText: "Favorite",
+          inactiveText: "Not favorite",
           activeLabel: "Remove from favorites",
           inactiveLabel: "Add to favorites",
+          activeIcon: "♥",
+          inactiveIcon: "♡",
           successMessage: "Favorite toggled {state}.",
           errorMessage: "Unable to update favorite.",
         });
@@ -244,10 +236,12 @@
           urlTemplate: flagUrlTemplate,
           datasetKey: "flagged",
           responseKey: "flagged",
-          activeText: "⚑ Unflag video",
-          inactiveText: "⚑ Flag video",
+          activeText: "Flagged",
+          inactiveText: "Not flagged",
           activeLabel: "Unflag video",
           inactiveLabel: "Flag video",
+          activeIcon: "⚑",
+          inactiveIcon: "⚑",
           successMessage: "Flag toggled {state}.",
           errorMessage: "Unable to update flag.",
         });

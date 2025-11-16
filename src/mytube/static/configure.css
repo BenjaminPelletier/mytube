@@ -198,40 +198,6 @@ h1 {
   gap: 0.5rem;
 }
 
-.resource-labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.resource-label-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-  background: #e9f2ff;
-  color: #24292f;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.resource-label-badge.is-favorite {
-  background: #ffeef0;
-  color: #9a2131;
-}
-
-.resource-label-badge.is-flagged {
-  background: #fff3c0;
-  color: #8f3b00;
-}
-
-.resource-label-badge.is-inactive {
-  opacity: 0.65;
-  font-weight: 500;
-}
-
 .resource-label-actions {
   display: flex;
   gap: 0.5rem;
@@ -239,23 +205,54 @@ h1 {
   align-items: center;
 }
 
-.resource-label-button {
-  padding: 0.4rem 0.75rem;
-  border-radius: 0.55rem;
+.resource-label-toggle,
+.resource-label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: #e9f2ff;
+  color: #24292f;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.resource-label-toggle {
   border: 1px solid #d0d7de;
   background: #ffffff;
   cursor: pointer;
-  font-weight: 600;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
-.resource-label-button[aria-pressed="true"] {
-  background: #e9f2ff;
-  border-color: #8da8ff;
+.resource-label-toggle:hover,
+.resource-label-toggle:focus-visible {
+  background: #e9eef5;
 }
 
-.resource-label-button:disabled {
+.resource-label-toggle:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.resource-label-toggle.is-favorite,
+.resource-label-badge.is-favorite {
+  background: #ffeef0;
+  color: #9a2131;
+  border-color: #f4c7ce;
+}
+
+.resource-label-toggle.is-flagged,
+.resource-label-badge.is-flagged {
+  background: #fff3c0;
+  color: #8f3b00;
+  border-color: #f3d580;
+}
+
+.resource-label-toggle.is-inactive,
+.resource-label-badge.is-inactive {
+  opacity: 0.7;
+  font-weight: 500;
 }
 
 .resource-label-status {
