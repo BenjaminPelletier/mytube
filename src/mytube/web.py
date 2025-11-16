@@ -301,12 +301,7 @@ def _listed_videos_content(
 
     approved_total: int | None = None
     if list_slug == "whitelist":
-        approved_total = sum(
-            1
-            for video in videos
-            if not video.get("blacklisted_by")
-            and not video.get("disqualifying_attributes")
-        )
+        approved_total = _count_approved_videos(videos)
 
     items: list[dict[str, Any]] = []
     for video in videos:
@@ -335,6 +330,7 @@ def _listed_resources_content(
     list_slug: str,
     resources: list[dict[str, Any]],
     regenerate_url: str,
+    approved_total: int | None = None,
 ) -> dict[str, Any]:
     heading_label = f"{LIST_PAGE_LABELS.get(list_slug, list_slug.title())} Resources"
 
@@ -362,6 +358,7 @@ def _listed_resources_content(
         "heading_label": heading_label,
         "regenerate_url": regenerate_url,
         "resources": items,
+        "approved_total": approved_total,
     }
 
 
@@ -675,6 +672,15 @@ def _build_listed_groups(
         if entries:
             groups.append({"icon": icon, "entries": entries})
     return groups
+
+
+def _count_approved_videos(videos: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for video in videos
+        if not video.get("blacklisted_by")
+        and not video.get("disqualifying_attributes")
+    )
 
 
 def _video_resource_content(
@@ -1449,11 +1455,13 @@ def create_app() -> FastAPI:
     )
     async def configure_whitelist(request: Request) -> HTMLResponse:
         resources = await run_in_threadpool(fetch_labeled_resources, "whitelisted")
+        videos = await run_in_threadpool(fetch_listed_videos, "whitelist")
+        approved_total = _count_approved_videos(videos)
         regenerate_url = app.url_path_for(
             "regenerate_listed_videos", list_slug="whitelist"
         )
         list_context = _listed_resources_content(
-            "whitelist", resources, regenerate_url
+            "whitelist", resources, regenerate_url, approved_total
         )
         heading = f"{LIST_PAGE_LABELS['whitelist']} Resources"
         return _render_config_page(
